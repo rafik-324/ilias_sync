@@ -9,16 +9,27 @@ Dieses Dokument ist der Arbeitsauftrag für einen eigenen Agenten, der **nur die
 ```
 ilias_sync/gui/
   __init__.py
-  app.py              Einstieg: QApplication, Einzelinstanz, Tray starten, Wizard bei Erststart
+  app.py              Einstieg: QApplication, Einzelinstanz, Logging, Tray, Wizard bei Erststart
+  controller.py       Zentraler Zustand (bereit, Sync, Fehler, Login, pausiert), nur ein Sync gleichzeitig
+  logic.py            Qt freie Hilfslogik (Zeitangaben, Benachrichtigungstexte, Vorschau Baum, Validierung)
   tray.py             Tray / Menüleisten Icon + Menü + Benachrichtigungen
   window.py           Hauptfenster mit Tabs
+  tab_overview.py     Tab Übersicht
+  tab_courses.py      Tab Kurse
+  rules_dialog.py     Dialog "Regeln bearbeiten"
+  tab_preview.py      Tab Vorschau
+  tab_settings.py     Tab Einstellungen
+  tab_log.py          Tab Log
+  widgets.py          Gemeinsame Widgets (Login Formular, Fortschritt, Vorschau Baum)
   setup_wizard.py     Erststart Assistent
   worker.py           QThread Worker für alle Backend Aufrufe, die länger dauern können
   scheduler_gui.py    QTimer, der den Intervall Sync auslöst (nutzt Werte aus der Config)
+  icons.py            Platzhalter Icons per QPainter (hell, dunkel, macOS Template), siehe Abschnitt 8
   fake_backend.py     Attrappe des Backends für Entwicklung und Tests
-  icons/              Icons (hell, dunkel, macOS Template), siehe Abschnitt 8
-tests/gui/            Tests für die GUI Logik
+tests/gui/            Tests für die GUI Logik und Widgets (pytest-qt)
 ```
+
+Stand 24.09.2026: alle Dateien oben sind umgesetzt und getestet. Start mit Beispieldaten: `python -m ilias_sync.gui.app --fake` (bzw. `--fake-setup` für den Wizard).
 
 **Der GUI Agent baut nicht und ändert nicht:** `auth.py`, `crawler.py`, `objects/`, `mapper.py`, `downloader.py`, `state.py`, `config.py`, `platform_utils.py`, `api.py`. Diese Module entstehen parallel oder später durch andere Agenten. Die GUI spricht **ausschließlich** über die Fassade `ilias_sync/api.py` (Abschnitt 3) mit dem Backend. Solange es die Fassade noch nicht gibt, wird gegen `gui/fake_backend.py` entwickelt.
 
