@@ -21,20 +21,23 @@ import logging
 import re
 import threading
 import time
-from collections.abc import Callable, Iterator
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup, Tag
 
-from .auth import ILIAS, TIMEOUT
+from .auth import ILIAS, TIMEOUT, is_logged_in, safe_url
 
 DASHBOARD = ILIAS + "/ilias.php?baseClass=ilDashboardGUI"
 DEFAULT_SEMESTER_PATTERN = r"\((HWS|FSS) (\d{4})\)"
-# Pause zwischen zwei Seitenabrufen in Sekunden (Server schonen)
+# Mindestabstand zwischen zwei Seitenabrufen in Sekunden, auch bei Parallelität (Server schonen)
 DEFAULT_DELAY = 0.5
+DEFAULT_PARALLEL = 3
+MAX_PARALLEL = 5
 
 # Objekttypen, in die der Crawler hineingeht
 CONTAINER_TYPES = {"crs", "grp", "fold", "sess"}
@@ -289,65 +292,195 @@ def parse_container(html: str, base_url: str = ILIAS) -> list[IliasObject]:
 
 # ---------------- Crawler ----------------
 
+class Throttle:
+    """Verteilt Anfragen über alle Threads im Abstand von mindestens delay Sekunden."""
+
+    def __init__(self, delay: float):
+        self.delay = delay
+        self._lock = threading.Lock()
+        self._next_slot = 0.0
+
+    def wait(self) -> None:
+        with self._lock:
+            now = time.monotonic()
+            slot = max(now, self._next_slot)
+            self._next_slot = slot + self.delay
+        if slot > now:
+            time.sleep(slot - now)
+
+
+class SessionExpired(Exception):
+    """Session abgelaufen und erneuter Login nicht möglich. Der Lauf wird abgebrochen."""
+
+
+class CrawlCancelled(Exception):
+    """Lauf über das cancel Token abgebrochen."""
+
+
+@dataclass
+class CrawlResult:
+    courses: list[Course]
+    # Kurs ref_id -> alle Objekte darin, Container vor ihrem Inhalt, mit Pfad
+    objects: dict[int, list[IliasObject]] = field(default_factory=dict)
+    # Kurs ref_id -> Name des Kurses, in dessen Baum er schon enthalten ist (z. B. Gruppen)
+    nested_in: dict[int, str] = field(default_factory=dict)
+    # ILIAS Pfade, deren Seite nicht gelesen werden konnte. Deren Inhalt ist unbekannt,
+    # nicht leer: ein Sync darf daraus nie schließen, dass Dateien entfernt wurden
+    failed: list[str] = field(default_factory=list)
+    pages_fetched: int = 0
+
+
 class Crawler:
-    """Liest Kurse und Objekte über eine eingeloggte Session. Schreibt nichts."""
+    """Liest Kurse und Objekte über eine eingeloggte Session. Schreibt nichts.
+
+    Seiten werden parallel abgerufen (max_parallel Threads), zwischen zwei Abrufen
+    liegen aber immer mindestens delay Sekunden, egal wie viele Threads laufen.
+    Läuft die Session ab, wird einmal über relogin neu eingeloggt."""
 
     def __init__(
         self,
         session: requests.Session,
         delay: float = DEFAULT_DELAY,
+        max_parallel: int = DEFAULT_PARALLEL,
         semester_pattern: str = DEFAULT_SEMESTER_PATTERN,
+        relogin: Callable[[], None] | None = None,
         cancel: threading.Event | None = None,
-        on_page: Callable[[str], None] | None = None,
+        on_page: Callable[[int], None] | None = None,
     ):
         self.session = session
         self.delay = delay
+        self.max_parallel = max(1, min(max_parallel, MAX_PARALLEL))
         self.semester_pattern = semester_pattern
+        self.relogin = relogin
         self.cancel = cancel or threading.Event()
         self.on_page = on_page
         self.pages_fetched = 0
-        self._last_request = 0.0
+        self.throttle = Throttle(delay)
+        self._lock = threading.Lock()
+        self._relogin_lock = threading.Lock()
+        self._session_generation = 0
+
+    # ---------- einzelne Seiten ----------
+
+    def _fetch(self, url: str) -> requests.Response:
+        if self.cancel.is_set():
+            raise CrawlCancelled()
+        self.throttle.wait()
+        r = self.session.get(url, timeout=TIMEOUT)
+        with self._lock:
+            self.pages_fetched += 1
+            count = self.pages_fetched
+        if self.on_page:
+            self.on_page(count)
+        r.raise_for_status()
+        return r
 
     def _get(self, url: str) -> str:
-        if self.cancel.is_set():
-            raise InterruptedError("abgebrochen")
-        wait = self._last_request + self.delay - time.monotonic()
-        if wait > 0:
-            time.sleep(wait)
-        r = self.session.get(url, timeout=TIMEOUT)
-        self._last_request = time.monotonic()
-        self.pages_fetched += 1
-        r.raise_for_status()
+        """Seite holen und sicherstellen, dass sie eingeloggt abgerufen wurde."""
+        generation = self._session_generation
+        r = self._fetch(url)
+        if is_logged_in(r):
+            return r.text
+
+        log.info("Session abgelaufen (Antwort von %s), neuer Login", safe_url(r.url))
+        if self.relogin is None:
+            raise SessionExpired("ILIAS Session abgelaufen, bitte neu anmelden.")
+        with self._relogin_lock:
+            # Nur ein Thread loggt neu ein, die anderen nutzen danach dessen Session
+            if self._session_generation == generation:
+                try:
+                    self.relogin()
+                except Exception as e:
+                    raise SessionExpired(f"ILIAS Session abgelaufen, neuer Login fehlgeschlagen: {e}") from None
+                self._session_generation += 1
+        r = self._fetch(url)
+        if not is_logged_in(r):
+            raise SessionExpired("ILIAS Session abgelaufen, auch nach neuem Login keine Anmeldung.")
         return r.text
 
     def fetch_courses(self) -> list[Course]:
         return parse_dashboard(self._get(DASHBOARD), self.semester_pattern)
 
     def list_container(self, url: str) -> list[IliasObject]:
-        if self.on_page:
-            self.on_page(url)
         return parse_container(self._get(url), url)
 
-    def walk(self, course: Course, visited: set[int] | None = None) -> Iterator[IliasObject]:
-        """Alle Objekte eines Kurses rekursiv, Container vor ihrem Inhalt.
+    # ---------- ganzer Lauf ----------
 
-        visited verhindert doppelte Besuche, auch über Kurse hinweg (z. B. eine
-        Gruppe, die im Kurs und auf dem Dashboard auftaucht)."""
-        visited = visited if visited is not None else set()
-        visited.add(course.ref_id)
-        yield from self._walk(course.url, [course.name], visited)
+    def crawl(self, courses: list[Course]) -> CrawlResult:
+        """Alle Kurse rekursiv erfassen.
 
-    def _walk(self, url: str, path: list[str], visited: set[int]) -> Iterator[IliasObject]:
-        try:
-            children = self.list_container(url)
-        except requests.RequestException as e:
-            log.warning("Seite nicht lesbar (%s): %s", " / ".join(path), type(e).__name__)
-            return
-        for obj in children:
-            if obj.ref_id in visited:
+        Phase 1 ruft alle erreichbaren Container parallel ab, jeden nur einmal.
+        Phase 2 baut daraus in fester Reihenfolge die Bäume je Kurs. Taucht ein
+        Kurs (z. B. eine Gruppe) schon im Baum eines früheren Kurses auf, wird er
+        dort geführt und in nested_in vermerkt."""
+        children, failed = self._fetch_all(courses)
+        result = CrawlResult(courses=courses, pages_fetched=self.pages_fetched)
+        owner: dict[int, str] = {}  # ref_id -> Name des Kurses, der es zuerst enthält
+        for course in courses:
+            if course.ref_id in owner:
+                result.nested_in[course.ref_id] = owner[course.ref_id]
                 continue
-            visited.add(obj.ref_id)
-            obj.path = list(path)
-            yield obj
+            owner[course.ref_id] = course.name
+            objs: list[IliasObject] = []
+            self._assemble(course.ref_id, [course.name], children, failed, owner, objs, result.failed)
+            result.objects[course.ref_id] = objs
+        return result
+
+    def _fetch_all(self, courses: list[Course]) -> tuple[dict[int, list[IliasObject]], set[int]]:
+        children: dict[int, list[IliasObject]] = {}
+        failed: set[int] = set()
+        scheduled: set[int] = set()
+        pending: dict[Future, int] = {}
+
+        with ThreadPoolExecutor(max_workers=self.max_parallel, thread_name_prefix="crawl") as pool:
+            def schedule(ref_id: int, url: str) -> None:
+                if ref_id not in scheduled:
+                    scheduled.add(ref_id)
+                    pending[pool.submit(self.list_container, url)] = ref_id
+
+            for course in courses:
+                schedule(course.ref_id, course.url)
+            try:
+                while pending:
+                    done, _ = wait(pending, return_when=FIRST_COMPLETED)
+                    for future in done:
+                        ref_id = pending.pop(future)
+                        try:
+                            objs = future.result()
+                        except requests.RequestException as e:
+                            log.warning("Seite nicht lesbar (ref_id %s): %s", ref_id, type(e).__name__)
+                            failed.add(ref_id)
+                            continue
+                        children[ref_id] = objs
+                        for obj in objs:
+                            if obj.is_container and obj.url:
+                                schedule(obj.ref_id, obj.url)
+            except BaseException:
+                # SessionExpired, CrawlCancelled oder Strg+C: offene Abrufe verwerfen
+                self.cancel.set()
+                for future in pending:
+                    future.cancel()
+                raise
+        return children, failed
+
+    def _assemble(
+        self,
+        ref_id: int,
+        path: list[str],
+        children: dict[int, list[IliasObject]],
+        failed: set[int],
+        owner: dict[int, str],
+        out: list[IliasObject],
+        failed_paths: list[str],
+    ) -> None:
+        if ref_id in failed:
+            failed_paths.append(" / ".join(path))
+            return
+        for child in children.get(ref_id, []):
+            if child.ref_id in owner:
+                continue
+            owner[child.ref_id] = path[0]
+            obj = replace(child, path=list(path))
+            out.append(obj)
             if obj.is_container and obj.url:
-                yield from self._walk(obj.url, [*path, obj.name], visited)
+                self._assemble(obj.ref_id, [*path, obj.name], children, failed, owner, out, failed_paths)

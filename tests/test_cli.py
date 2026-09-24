@@ -56,3 +56,13 @@ def test_remember_username_without_login_does_nothing(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "config_file", lambda: path)
     cli.remember_username(Config(base_dir=None), None)
     assert not path.exists()
+
+
+def test_test_target_must_not_be_inside_semester(tmp_path):
+    root = tmp_path / "01_Universität_Mannheim"
+    (root / "01_SEMESTER" / "01_marketing").mkdir(parents=True)
+    (root / "code_projects").mkdir()
+    assert cli.check_test_target(root / "_ILIAS_Sync_Test", root) is None
+    assert cli.check_test_target(root, root) is not None
+    assert cli.check_test_target(root / "01_SEMESTER", root) is not None
+    assert "01_SEMESTER" in cli.check_test_target(root / "01_SEMESTER" / "01_marketing" / "x", root)

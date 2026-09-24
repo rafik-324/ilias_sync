@@ -1,0 +1,375 @@
+"""Mapper Tests mit der Beispielstruktur aus CLAUDE.md (in tmp_path nachgebaut)."""
+
+from pathlib import Path
+
+import pytest
+
+from ilias_sync import mapper
+from ilias_sync.api import Config, CourseConfig, CourseRule
+from ilias_sync.crawler import Course, CrawlResult, IliasObject
+
+STRUCTURE = [
+    "01_SEMESTER/00_mathe_vorkurs/01_Vorlesung",
+    "01_SEMESTER/00_mathe_vorkurs/02_Übung",
+    "01_SEMESTER/01_marketing/01_Vorlesung",
+    "01_SEMESTER/01_marketing/02_Übung",
+    "01_SEMESTER/01_marketing/03_Tutorium",
+    "01_SEMESTER/02_praktische_informatik_I/01_Vorlesung/01 Einführung",
+    "01_SEMESTER/02_praktische_informatik_I/02_Übung",
+    "01_SEMESTER/02_praktische_informatik_I/03_Tutorium",
+    "01_SEMESTER/02_praktische_informatik_I/04_code/01_übung-MacBook Pro von Rafael",
+    "01_SEMESTER/03_programmier_praktikum_1/01_Vorlesung",
+    "01_SEMESTER/03_programmier_praktikum_1/02_Übung",
+    "01_SEMESTER/03_programmier_praktikum_1/03_Tutorium/01_tutorium",
+    "01_SEMESTER/03_programmier_praktikum_1/04_freiwillige_abgaben",
+    "01_SEMESTER/03_programmier_praktikum_1/linux_data",
+    "01_SEMESTER/04_wirtschaftsinformatik_1/01_vorlesung",
+    "01_SEMESTER/04_wirtschaftsinformatik_1/02_tutorium",
+    "01_SEMESTER/05_formale_grundlagen/01_Vorlesung",
+    "01_SEMESTER/05_formale_grundlagen/02_Übung",
+    "01_SEMESTER/05_formale_grundlagen/03_Übungsblätter",
+    "02_Studium_vault",
+    "code_projects",
+]
+IGNORE = ["04_code", "linux_data", "*-MacBook*", "* von *"]
+PATTERN = Config(base_dir=None).semester_pattern
+
+
+@pytest.fixture
+def root(tmp_path) -> Path:
+    for rel in STRUCTURE:
+        (tmp_path / rel).mkdir(parents=True)
+    return tmp_path
+
+
+def make_mapper(root: Path, **cfg) -> mapper.Mapper:
+    return mapper.Mapper(Config(base_dir=None, ignore_local_dirs=IGNORE, **cfg), root)
+
+
+def crs(ref_id: int, name: str, kind: str = "crs", heading: str | None = "HWS 2026") -> Course:
+    from ilias_sync.crawler import semester_from_name
+    return Course(kind, ref_id, name, f"u{ref_id}", semester_from_name(name), heading)
+
+
+def tree(course: Course, spec: list[tuple[str, str, int]]) -> list[IliasObject]:
+    """spec: (Typ, ILIAS Pfad ab Kurs mit " / ", ref_id) in DFS Reihenfolge."""
+    objs = []
+    for obj_type, path, ref_id in spec:
+        *parents, name = path.split(" / ")
+        objs.append(IliasObject(obj_type, ref_id, name, f"u{ref_id}", path=[course.name, *parents]))
+    return objs
+
+
+def map_one(root: Path, course: Course, spec, **cfg) -> dict[str, str]:
+    result = CrawlResult(courses=[course], objects={course.ref_id: tree(course, spec)})
+    mapped = make_mapper(root, **cfg).map_crawl(result)
+    return {it.obj.ilias_path.split(" / ", 1)[1]: "/".join(it.rel_path) for it in mapped.items}
+
+
+# ---------------- Normalisierung und Schlüsselwörter ----------------
+
+@pytest.mark.parametrize(
+    "a, b",
+    [
+        ("02_Übung", "Übung"),
+        ("02_uebung", "Übung"),
+        ("01_vorlesung", "Vorlesung"),
+        ("01 Einführung", "00 Einführung"),
+        ("03_Übungsblätter", "Uebungsblaetter"),
+    ],
+)
+def test_folder_key_equal(a, b):
+    assert mapper.folder_key(a) == mapper.folder_key(b)
+
+
+def test_folder_key_keeps_short_numbers_apart():
+    assert mapper.folder_key("1. PG") != mapper.folder_key("2. PG")
+
+
+@pytest.mark.parametrize(
+    "a, b, equal",
+    [
+        ("Tutorium 01", "01_tutorium", True),
+        ("Tutorium_1", "01_Tutorium", True),
+        ("Übung 2", "02_uebung", True),
+        ("Tutorium 01", "02_tutorium", False),
+        ("1. PG", "2. PG", False),
+    ],
+)
+def test_loose_folder_key(a, b, equal):
+    assert (mapper.loose_folder_key(a) == mapper.loose_folder_key(b)) is equal
+
+
+def test_swapped_number_finds_existing_folder(root):
+    c = crs(1, "Programmierpraktikum I, Große Übung [Ü] (HWS 2026)")
+    paths = map_one(root, c, [
+        ("fold", "Tutorien", 2),
+        ("fold", "Tutorien / Tutorium 01", 3),
+        ("file", "Tutorien / Tutorium 01 / a.pdf", 4),
+        ("fold", "Tutorien / Tutorium 02", 5),
+        ("file", "Tutorien / Tutorium 02 / b.pdf", 6),
+    ])
+    assert paths == {
+        "Tutorien / Tutorium 01 / a.pdf": "01_SEMESTER/03_programmier_praktikum_1/03_Tutorium/01_tutorium/a.pdf",
+        # 02_tutorium gibt es im Test Aufbau nicht: neuer Ordner mit ILIAS Namen
+        "Tutorien / Tutorium 02 / b.pdf": "01_SEMESTER/03_programmier_praktikum_1/03_Tutorium/Tutorium 02/b.pdf",
+    }
+
+
+@pytest.mark.parametrize(
+    "name, suffix, expected",
+    [
+        ("Vorlesung", None, "Vorlesung"),
+        ("Vorlesungsfolien", None, "Vorlesung"),
+        ("Lecture Slides", None, "Vorlesung"),
+        ("Übung", None, "Übung"),
+        ("Uebung 01", None, "Übung"),
+        ("Tutorien", None, "Tutorium"),
+        ("Tut1-PG3", None, "Tutorium"),
+        ("Institut", None, None),
+        ("Übungsblätter", None, "Übungsblätter"),
+        ("Aufgabenblatt 3", None, "Übungsblätter"),
+        ("Abgaben", None, "Abgaben"),
+        ("Linux: Folien und Übung", "Übung", "Übung"),
+        ("Studenteninitiativen", None, None),
+        ("Praktische Informatik I - Tut [1. PG]", None, "Tutorium"),
+    ],
+)
+def test_keyword_category(name, suffix, expected):
+    assert mapper.keyword_category(name, preferred=suffix) == expected
+
+
+@pytest.mark.parametrize(
+    "name, pure",
+    [("Vorlesung", True), ("Tutorien", True), ("Übungsblätter", True), ("Vorlesungsfolien", True),
+     ("Große Übung", True), ("Übung 01", False), ("Tutorium_1", False), ("Linux: Folien und Übung", False)],
+)
+def test_is_pure_category_name(name, pure):
+    assert mapper.is_pure_category_name(name) is pure
+
+
+@pytest.mark.parametrize(
+    "name, expected",
+    [
+        ("Praktische Informatik I [V] [1. PG] (HWS 2026)", "Vorlesung"),
+        ("Praktische Informatik I [Ü] [1. PG] (HWS 2026)", "Übung"),
+        ("Praktische Informatik I [T] (HWS 2026)", "Tutorium"),
+        ("Marketing [2. PG]", None),
+    ],
+)
+def test_course_suffix_category(name, expected):
+    assert mapper.course_suffix_category(name) == expected
+
+
+# ---------------- Kurs Zuordnung ----------------
+
+LOCAL_COURSES = ["00_mathe_vorkurs", "01_marketing", "02_praktische_informatik_I",
+                 "03_programmier_praktikum_1", "04_wirtschaftsinformatik_1", "05_formale_grundlagen"]
+
+
+@pytest.mark.parametrize(
+    "ilias, expected",
+    [
+        ("Marketing [V] (HWS 2026)", "01_marketing"),
+        ("Praktische Informatik I [V] [1. PG] (HWS 2026)", "02_praktische_informatik_I"),
+        ("Praktische Informatik I [Ü] [1. PG] (HWS 2026)", "02_praktische_informatik_I"),
+        ("Praktische Informatik I [T] (HWS 2026)", "02_praktische_informatik_I"),
+        ("Programmierpraktikum I, Große Übung [Ü] (HWS 2026)", "03_programmier_praktikum_1"),
+        ("Programmierpraktikum I [V] (HWS 2026)", "03_programmier_praktikum_1"),
+        ("IS 201 Wirtschaftsinformatik I: Einführung und Grundlagen [V] (HWS 2026)", "04_wirtschaftsinformatik_1"),
+        ("Formale Grundlagen der Informatik [V] (HWS 2026)", "05_formale_grundlagen"),
+        ("Statistik I (HWS 2026)", None),
+    ],
+)
+def test_best_course_dir(ilias, expected):
+    assert mapper.best_course_dir(ilias, LOCAL_COURSES, PATTERN)[0] == expected
+
+
+def test_assign_semesters_chronologically():
+    assert mapper.assign_semesters(["FSS 2027", "HWS 2026"], {}, ["01_SEMESTER"]) == {
+        "HWS 2026": "01_SEMESTER",
+        "FSS 2027": "02_SEMESTER",
+    }
+    assert mapper.assign_semesters(["FSS 2027"], {"HWS 2026": "01_SEMESTER"}, ["01_SEMESTER"]) == {
+        "HWS 2026": "01_SEMESTER",
+        "FSS 2027": "02_SEMESTER",
+    }
+
+
+# ---------------- Ganze Pfade ----------------
+
+def test_lecture_course_with_dateien_folder(root):
+    c = crs(1, "Marketing [V] (HWS 2026)")
+    paths = map_one(root, c, [
+        ("fold", "Dateien", 2),
+        ("fold", "Dateien / Tutorium", 3),
+        ("file", "Dateien / Tutorium / Skript.pdf", 4),
+        ("fold", "Dateien / Übung", 5),
+        ("fold", "Dateien / Übung / Zusatzmaterialien Case Study", 6),
+        ("file", "Dateien / Übung / Zusatzmaterialien Case Study / Case.pdf", 7),
+        ("file", "Dateien / Übung / Ü1.pdf", 8),
+        ("fold", "Dateien / Vorlesung", 9),
+        ("file", "Dateien / Vorlesung / Folien.pdf", 10),
+    ])
+    assert paths == {
+        "Dateien / Tutorium / Skript.pdf": "01_SEMESTER/01_marketing/03_Tutorium/Skript.pdf",
+        "Dateien / Übung / Zusatzmaterialien Case Study / Case.pdf":
+            "01_SEMESTER/01_marketing/02_Übung/Zusatzmaterialien Case Study/Case.pdf",
+        "Dateien / Übung / Ü1.pdf": "01_SEMESTER/01_marketing/02_Übung/Ü1.pdf",
+        "Dateien / Vorlesung / Folien.pdf": "01_SEMESTER/01_marketing/01_Vorlesung/Folien.pdf",
+    }
+
+
+def test_exercise_course_without_keyword_uses_suffix(root):
+    c = crs(1, "Praktische Informatik I [Ü] [1. PG] (HWS 2026)")
+    paths = map_one(root, c, [
+        ("fold", "Dateien", 2),
+        ("fold", "Dateien / W01", 3),
+        ("file", "Dateien / W01 / Blatt.pdf", 4),
+    ])
+    assert paths == {"Dateien / W01 / Blatt.pdf": "01_SEMESTER/02_praktische_informatik_I/02_Übung/W01/Blatt.pdf"}
+
+
+def test_tutorial_inside_exercise_course_goes_to_tutorium(root):
+    c = crs(1, "Programmierpraktikum I, Große Übung [Ü] (HWS 2026)")
+    paths = map_one(root, c, [
+        ("fold", "Große Übung", 2),
+        ("fold", "Große Übung / Übung 01", 3),
+        ("file", "Große Übung / Übung 01 / Uebung_1.pdf", 4),
+        ("fold", "Tutorien", 5),
+        ("fold", "Tutorien / Tutorium 01", 6),
+        ("file", "Tutorien / Tutorium 01 / Tut.pdf", 7),
+    ])
+    assert paths == {
+        "Große Übung / Übung 01 / Uebung_1.pdf": "01_SEMESTER/03_programmier_praktikum_1/02_Übung/Übung 01/Uebung_1.pdf",
+        "Tutorien / Tutorium 01 / Tut.pdf": "01_SEMESTER/03_programmier_praktikum_1/03_Tutorium/01_tutorium/Tut.pdf",
+    }
+
+
+def test_existing_lowercase_category_and_subfolder_reused(root):
+    c = crs(1, "IS 201 Wirtschaftsinformatik I: Einführung und Grundlagen [V] (HWS 2026)")
+    paths = map_one(root, c, [
+        ("fold", "Tutorium", 2),
+        ("file", "Tutorium / T1.pdf", 3),
+        ("file", "V1.pdf", 4),
+    ])
+    assert paths == {
+        "Tutorium / T1.pdf": "01_SEMESTER/04_wirtschaftsinformatik_1/02_tutorium/T1.pdf",
+        "V1.pdf": "01_SEMESTER/04_wirtschaftsinformatik_1/01_vorlesung/V1.pdf",
+    }
+
+
+def test_existing_deeper_folder_found_despite_other_number(root):
+    c = crs(1, "Praktische Informatik I [V] [1. PG] (HWS 2026)")
+    paths = map_one(root, c, [
+        ("fold", "Vorlesung", 2),
+        ("fold", "Vorlesung / 00 Einführung", 3),
+        ("file", "Vorlesung / 00 Einführung / E.pdf", 4),
+        ("fold", "Vorlesung / 07 Objektorientierte Programmierung: Einführung", 5),
+        ("file", "Vorlesung / 07 Objektorientierte Programmierung: Einführung / O.pdf", 6),
+    ])
+    assert paths["Vorlesung / 00 Einführung / E.pdf"] == \
+        "01_SEMESTER/02_praktische_informatik_I/01_Vorlesung/01 Einführung/E.pdf"
+    # Doppelpunkt ist unter Windows verboten
+    assert paths["Vorlesung / 07 Objektorientierte Programmierung: Einführung / O.pdf"] == \
+        "01_SEMESTER/02_praktische_informatik_I/01_Vorlesung/07 Objektorientierte Programmierung_ Einführung/O.pdf"
+
+
+def test_uebungsblaetter_folder_used_when_present(root):
+    c = crs(1, "Formale Grundlagen der Informatik [V] (HWS 2026)")
+    paths = map_one(root, c, [
+        ("fold", "Übungsblätter", 2),
+        ("file", "Übungsblätter / ub01.pdf", 3),
+        ("fold", "Tutorien", 4),
+        ("file", "Tutorien / t1.pdf", 5),
+    ])
+    assert paths["Übungsblätter / ub01.pdf"] == "01_SEMESTER/05_formale_grundlagen/03_Übungsblätter/ub01.pdf"
+    # Tutorium gibt es lokal noch nicht: nächste freie Nummer, Schreibweise wie die Mehrheit
+    assert paths["Tutorien / t1.pdf"] == "01_SEMESTER/05_formale_grundlagen/04_Tutorium/t1.pdf"
+
+
+def test_uebungsblaetter_falls_back_to_uebung(root):
+    c = crs(1, "Marketing [V] (HWS 2026)")
+    paths = map_one(root, c, [("fold", "Übungsblätter", 2), ("file", "Übungsblätter / b.pdf", 3)])
+    assert paths["Übungsblätter / b.pdf"] == "01_SEMESTER/01_marketing/02_Übung/b.pdf"
+
+
+def test_new_category_number_skips_ignored_folder_numbers(root):
+    c = crs(1, "Praktische Informatik I [V] (HWS 2026)")
+    paths = map_one(root, c, [("fold", "Abgaben", 2), ("file", "Abgaben / a.zip", 3)])
+    # 04_code ist ignoriert, belegt aber die Nummer 04
+    assert paths["Abgaben / a.zip"] == "01_SEMESTER/02_praktische_informatik_I/05_Abgaben/a.zip"
+
+
+def test_existing_partial_category_name(root):
+    c = crs(1, "Programmierpraktikum I [V] (HWS 2026)")
+    paths = map_one(root, c, [("fold", "Abgaben", 2), ("file", "Abgaben / a.zip", 3)])
+    assert paths["Abgaben / a.zip"] == "01_SEMESTER/03_programmier_praktikum_1/04_freiwillige_abgaben/a.zip"
+
+
+def test_never_maps_into_ignored_folder(root):
+    # Ignore Muster gelten auf jeder Ebene: ein Ordner namens linux_data würde nie beschrieben
+    c = crs(1, "Programmierpraktikum I [V] (HWS 2026)")
+    paths = map_one(root, c, [("fold", "linux_data", 2), ("file", "linux_data / x.txt", 3)])
+    assert paths["linux_data / x.txt"] == \
+        "01_SEMESTER/03_programmier_praktikum_1/01_Vorlesung/linux_data (ILIAS)/x.txt"
+    c2 = crs(2, "Programmierpraktikum I (HWS 2026)")
+    paths = map_one(root, c2, [("fold", "linux_data", 2), ("file", "linux_data / x.txt", 3)])
+    assert paths["linux_data / x.txt"] == "01_SEMESTER/03_programmier_praktikum_1/linux_data (ILIAS)/x.txt"
+
+
+def test_group_with_tut_keyword(root):
+    c = crs(1, "Praktische Informatik I [T] (HWS 2026)")
+    paths = map_one(root, c, [
+        ("grp", "Praktische Informatik I - Tut [1. PG]", 2),
+        ("fold", "Praktische Informatik I - Tut [1. PG] / Dateien", 3),
+        ("file", "Praktische Informatik I - Tut [1. PG] / Dateien / t.pdf", 4),
+    ])
+    assert paths == {
+        "Praktische Informatik I - Tut [1. PG] / Dateien / t.pdf":
+            "01_SEMESTER/02_praktische_informatik_I/03_Tutorium/t.pdf",
+    }
+
+
+def test_unknown_course_goes_to_new_courses(root):
+    c = crs(1, "Statistik I (HWS 2026)")
+    paths = map_one(root, c, [("fold", "Vorlesung", 2), ("file", "Vorlesung / s.pdf", 3)])
+    assert paths == {"Vorlesung / s.pdf": "01_SEMESTER/_Neue_Kurse/Statistik I (HWS 2026)/Vorlesung/s.pdf"}
+
+
+def test_course_without_semester(root):
+    c = crs(1, "License Information", heading="MSDNAA")
+    paths = map_one(root, c, [("file", "Matlab.pdf", 2)])
+    assert paths == {"Matlab.pdf": "_Ohne_Semester/License Information/Matlab.pdf"}
+
+
+def test_config_course_and_rules_win(root):
+    c = crs(1, "Marketing [V] (HWS 2026)")
+    cfg = {
+        "semesters": {"HWS 2026": "01_SEMESTER"},
+        "courses": [CourseConfig(ref_id=1, ilias_name=c.name, local_dir="01_marketing",
+                                 rules=[CourseRule(target="99_Spezial", match_file="*blatt*.pdf")])],
+    }
+    paths = map_one(root, c, [
+        ("fold", "Vorlesung", 2),
+        ("file", "Vorlesung / aufgabenblatt1.pdf", 3),
+        ("file", "Vorlesung / folie.pdf", 4),
+    ], **cfg)
+    assert paths == {
+        "Vorlesung / aufgabenblatt1.pdf": "01_SEMESTER/01_marketing/99_Spezial/Vorlesung/aufgabenblatt1.pdf",
+        "Vorlesung / folie.pdf": "01_SEMESTER/01_marketing/01_Vorlesung/folie.pdf",
+    }
+
+
+def test_new_dirs_are_reported(root):
+    c = crs(1, "Praktische Informatik I [Ü] (HWS 2026)")
+    result = CrawlResult(courses=[c], objects={1: tree(c, [("fold", "W01", 2), ("file", "W01 / a.pdf", 3)])})
+    (item,) = make_mapper(root).map_crawl(result).items
+    assert item.new_dirs == {("01_SEMESTER", "02_praktische_informatik_I", "02_Übung", "W01")}
+
+
+def test_mapper_does_not_write(root):
+    before = sorted(p.relative_to(root) for p in root.rglob("*"))
+    c = crs(1, "Statistik I (HWS 2026)")
+    map_one(root, c, [("fold", "Neu", 2), ("file", "Neu / a.pdf", 3)])
+    assert sorted(p.relative_to(root) for p in root.rglob("*")) == before

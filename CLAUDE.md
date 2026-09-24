@@ -58,7 +58,8 @@ Backend und GUI werden parallel von zwei Claude Sitzungen entwickelt. Jede hat i
 ```
 ilias_sync/
   __main__.py          Einstieg: GUI starten oder CLI Modus (bisher --login, --logout, --crawl
-                       mit --course/--output/-v; --sync und --dry-run folgen mit Meilenstein 3)
+                       mit --course/--output/-v, --test-sync ZIELORDNER [--videos];
+                       --sync und --dry-run folgen mit Meilenstein 3)
   auth.py              Login, Session, Cookies, Keyring (Basis: ilias_login.py)
   crawler.py           ILIAS Kurse und Objekte rekursiv erfassen
   objects/             Handler pro ILIAS Objekttyp
@@ -245,7 +246,11 @@ Schlüsselwörter (case insensitive, Umlaute normalisiert, `ue`=`ü`, Vergleich 
 | abgabe, submission, hausaufgabe | Abgaben |
 | nichts davon | weiter mit Schritt 3 |
 
-Enthält ein Name Schlüsselwörter mehrerer Kategorien (z. B. `Linux: Folien und Übung`), entscheidet das Kürzel des Kurses, falls es zu einer davon passt, sonst die erste Zeile der Tabelle.
+Enthält ein Name Schlüsselwörter mehrerer Kategorien (z. B. `Linux: Folien und Übung`), entscheidet das Kürzel des Kurses, falls es zu einer davon passt, sonst die erste Zeile der Tabelle. Ist ein Treffer nur Teil eines längeren (`übung` in `übungsblatt`), zählt nur der längere.
+
+* Ein ILIAS Ordner, der nur die Kategorie benennt (`Vorlesung`, `Tutorien`, `Vorlesungsfolien`, `Große Übung`), wird selbst zum Kategorieordner. Trägt er mehr im Namen (`Übung 01`, `Tutorium_1`, `Linux: Folien und Übung`), bleibt er als Unterordner der Kategorie erhalten
+* Ignore Muster gelten auf jeder Ebene: soll ein neuer Ordner so heißen, bekommt er den Zusatz ` (ILIAS)`
+* Kurse ohne erkennbares Semester (z. B. MSDNAA Lizenzkurs) landen unter `_Ohne_Semester/<ILIAS Kursname>/`
 
 * Existiert lokal bereits ein passender Ordner (Vergleich ohne Nummernpräfix, ohne Groß/Kleinschreibung, Umlaute normalisiert), **diesen verwenden**. Also `02_tutorium` wird für Kategorie Tutorium genutzt, kein zweiter Ordner angelegt
 * Existiert keiner: neuen Ordner mit nächster freier Nummer anlegen, Schreibweise nach Mehrheit im Kurs (z. B. `03_Tutorium`)
@@ -385,7 +390,12 @@ Sync läuft immer in einem Worker Thread (`QThread`), die GUI blockiert nie.
 
 Nach jedem Meilenstein lauffähig und getestet, bevor der nächste beginnt.
 
-**Stand (2026-09-24)**: Meilenstein 1 und 2 fertig (Crawler Ausbau mit Parallelität in Arbeit). Als Nächstes Meilenstein 3. GUI (Meilenstein 6) läuft parallel auf Branch `gui` gegen das Fake Backend.
+**Stand (2026-09-24)**: Meilenstein 1 und 2 fertig, Crawler mit 3 parallelen Abrufen und automatischem Relogin. Meilenstein 4 (Mapper) vorgezogen und weitgehend fertig, weil der Downloader die Zielpfade braucht. Von Meilenstein 3 gibt es den einfachen Downloader (`.part`, atomar, nie überschreiben) und `--test-sync`, der in `01_Universität_Mannheim\_ILIAS_Sync_Test` einsortiert. Es fehlen noch Status Index (`state.py`), Versionierung (`_alt_`, `_ilias_`), `--dry-run` und `--sync`. **Der echte `01_SEMESTER` wird bis zur Fertigstellung nur gelesen** (Vorgabe des Nutzers). GUI (Meilenstein 6) läuft parallel auf Branch `gui` gegen das Fake Backend.
+
+Offene Entscheidungen des Nutzers (nach dem Test Sync):
+* PI1 Vorlesung: eigene Ordner (`01_Vorlesung_grundlagen_programmiereung`, `02_Vorlesung_grundlagen_Java`) heißen anders als in ILIAS (`01 Vom Problem zum Programm` ...), der Mapper legt die ILIAS Ordner daneben an. Umbenennen oder Config Regeln?
+* Matlab Lizenzkurs (MSDNAA, landet in `_Ohne_Semester`): behalten oder ignorieren?
+* Videos (85 Stück, etwa 4 GB): laden oder nicht?
 
 Ausnahme: Die GUI (Meilenstein 6) kann parallel von einem eigenen Agenten gegen `gui/fake_backend.py` entwickelt werden (siehe `GUI_KONTEXT.md`). `api.py` entsteht schrittweise mit den Backend Meilensteinen und ersetzt dann die Attrappe.
 

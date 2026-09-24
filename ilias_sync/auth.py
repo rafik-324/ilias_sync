@@ -268,6 +268,12 @@ def get_session(credentials: CredentialsProvider, cookie_path: Path | None = Non
         return s
 
     log.info("Keine gültige Session, neuer Login")
+    relogin(s, credentials)
+    return s
+
+
+def relogin(s: requests.Session, credentials: CredentialsProvider) -> None:
+    """Mit derselben Session neu einloggen, z. B. wenn sie mitten im Crawl abläuft."""
     creds = credentials()
     try:
         login(s, creds.user, creds.password)
@@ -277,4 +283,3 @@ def get_session(credentials: CredentialsProvider, cookie_path: Path | None = Non
     if creds.remember:
         store_password(creds.user, creds.password)
     save_cookies(s)
-    return s

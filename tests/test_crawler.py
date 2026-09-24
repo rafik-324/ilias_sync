@@ -1,11 +1,14 @@
 """Parser Tests gegen gekürzte echte ILIAS Seiten (tests/fixtures/)."""
 
+import threading
+import time
 from datetime import date, datetime
 from pathlib import Path
 
 import pytest
+import requests
 
-from ilias_sync import crawler
+from ilias_sync import auth, crawler
 from ilias_sync.crawler import Course, Crawler, IliasObject
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -188,44 +191,193 @@ def test_parse_goto():
 class FakeCrawler(Crawler):
     """Liefert Container Inhalte aus einem Dict statt aus dem Netz."""
 
-    def __init__(self, pages: dict[str, list[IliasObject]]):
-        super().__init__(session=None, delay=0)
+    def __init__(self, pages: dict[str, list[IliasObject]], fail: set[str] = frozenset(), **kw):
+        super().__init__(session=None, delay=0, **kw)
         self.pages = pages
+        self.fail = fail
         self.visited_urls = []
 
     def list_container(self, url):
         self.visited_urls.append(url)
+        if url in self.fail:
+            raise requests.ConnectionError("simuliert")
         return [IliasObject(o.type, o.ref_id, o.name, o.url) for o in self.pages.get(url, [])]
 
 
-def test_walk_recurses_and_builds_paths():
+def course(ref_id: int, name: str, url: str, kind: str = "crs") -> Course:
+    return Course(kind, ref_id, name, url, None, None)
+
+
+def test_crawl_recurses_and_builds_paths_in_order():
     pages = {
         "k": [IliasObject("fold", 2, "Vorlesung", "f2"), IliasObject("webr", 3, "Link", "w3")],
         "f2": [IliasObject("fold", 4, "Woche 1", "f4"), IliasObject("file", 5, "a.pdf", "d5")],
         "f4": [IliasObject("file", 6, "b.pdf", "d6")],
     }
-    course = Course("crs", 1, "Kurs", "k", None, None)
-    objs = list(FakeCrawler(pages).walk(course))
-    assert [o.ilias_path for o in objs] == [
+    result = FakeCrawler(pages, max_parallel=3).crawl([course(1, "Kurs", "k")])
+    assert [o.ilias_path for o in result.objects[1]] == [
         "Kurs / Vorlesung",
         "Kurs / Vorlesung / Woche 1",
         "Kurs / Vorlesung / Woche 1 / b.pdf",
         "Kurs / Vorlesung / a.pdf",
         "Kurs / Link",
     ]
+    assert result.failed == []
 
 
-def test_walk_skips_already_visited_and_does_not_enter_non_containers():
+def test_crawl_fetches_each_container_once_and_handles_cycles():
     pages = {
         "k": [IliasObject("grp", 2, "Gruppe", "g2"), IliasObject("frm", 3, "Forum", "fr3")],
         "g2": [IliasObject("fold", 4, "Ordner", "f4")],
         "f4": [IliasObject("grp", 2, "Gruppe", "g2")],  # Zyklus
     }
     c = FakeCrawler(pages)
-    visited: set[int] = set()
-    objs = list(c.walk(Course("crs", 1, "Kurs", "k", None, None), visited))
-    assert [o.ref_id for o in objs] == [2, 4, 3]
-    assert c.visited_urls == ["k", "g2", "f4"]
-    # Gruppe ist schon besucht, eigener Durchlauf liefert nichts Neues außer sich selbst
-    again = list(FakeCrawler(pages).walk(Course("grp", 2, "Gruppe", "g2", None, None), visited))
-    assert again == []
+    result = c.crawl([course(1, "Kurs", "k"), course(2, "Gruppe", "g2", "grp")])
+    assert [o.ref_id for o in result.objects[1]] == [2, 4, 3]
+    # Forum ist kein Container, Gruppe wird trotz zwei Fundstellen nur einmal abgerufen
+    assert sorted(c.visited_urls) == ["f4", "g2", "k"]
+    # Die Gruppe steht auch auf dem Dashboard, ist aber schon im Kurs enthalten
+    assert result.nested_in == {2: "Kurs"}
+    assert 2 not in result.objects
+
+
+def test_crawl_group_first_on_dashboard_keeps_its_own_tree():
+    pages = {"g2": [IliasObject("file", 5, "a.pdf", "d5")], "k": [IliasObject("grp", 2, "Gruppe", "g2")]}
+    result = FakeCrawler(pages).crawl([course(2, "Gruppe", "g2", "grp"), course(1, "Kurs", "k")])
+    assert [o.name for o in result.objects[2]] == ["a.pdf"]
+    assert result.objects[1] == []
+
+
+def test_crawl_records_unreadable_pages_instead_of_treating_them_as_empty():
+    pages = {
+        "k": [IliasObject("fold", 2, "Kaputt", "f2"), IliasObject("fold", 3, "Gut", "f3")],
+        "f3": [IliasObject("file", 5, "a.pdf", "d5")],
+    }
+    result = FakeCrawler(pages, fail={"f2"}).crawl([course(1, "Kurs", "k")])
+    assert result.failed == ["Kurs / Kaputt"]
+    assert [o.name for o in result.objects[1]] == ["Kaputt", "Gut", "a.pdf"]
+
+
+def test_crawl_is_parallel():
+    # 6 Ordner, jeder Abruf dauert 0,2 s: nacheinander 1,2 s, mit 3 Threads etwa 0,4 s
+    class Slow(FakeCrawler):
+        def list_container(self, url):
+            time.sleep(0.2)
+            return super().list_container(url)
+
+    pages = {"k": [IliasObject("fold", i, f"O{i}", f"f{i}") for i in range(2, 8)]}
+    started = time.monotonic()
+    Slow(pages, max_parallel=3).crawl([course(1, "Kurs", "k")])
+    assert time.monotonic() - started < 0.9
+
+
+def test_max_parallel_is_capped():
+    assert FakeCrawler({}, max_parallel=50).max_parallel == crawler.MAX_PARALLEL
+    assert FakeCrawler({}, max_parallel=0).max_parallel == 1
+
+
+# ---------------- Abstand und Session ----------------
+
+LOGGED_IN = '<html><a href="logout.php?lang=de">Abmelden</a></html>'
+LOGIN_PAGE = '<html><a href="login.php?cmd=force_login">Anmelden</a></html>'
+
+
+def response(url: str, html: str) -> requests.Response:
+    r = requests.Response()
+    r.url = url
+    r.status_code = 200
+    r._content = html.encode("utf-8")
+    r.encoding = "utf-8"
+    return r
+
+
+class ScriptedSession:
+    """Antwortet der Reihe nach mit vorgegebenen Seiten, merkt sich die Zeitpunkte."""
+
+    def __init__(self, pages: list[tuple[str, str]]):
+        self.pages = list(pages)
+        self.times = []
+        self.lock = threading.Lock()
+
+    def get(self, url, timeout):
+        with self.lock:
+            self.times.append(time.monotonic())
+            final_url, html = self.pages.pop(0) if self.pages else (url, LOGGED_IN)
+        return response(final_url, html)
+
+
+def test_throttle_spaces_requests_across_threads():
+    s = ScriptedSession([])
+    c = Crawler(s, delay=0.1, max_parallel=5)
+    threads = [threading.Thread(target=c._get, args=(f"{crawler.ILIAS}/x{i}",)) for i in range(5)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    times = sorted(s.times)
+    gaps = [b - a for a, b in zip(times, times[1:])]
+    assert len(times) == 5
+    assert min(gaps) >= 0.09
+
+
+def test_expired_session_triggers_one_relogin_and_retry():
+    url = crawler.ILIAS + "/goto.php/fold/1"
+    s = ScriptedSession([(crawler.ILIAS + "/login.php", LOGIN_PAGE), (url, LOGGED_IN)])
+    calls = []
+    c = Crawler(s, delay=0, relogin=lambda: calls.append(1))
+    assert c._get(url) == LOGGED_IN
+    assert calls == [1]
+    assert c.pages_fetched == 2
+
+
+def test_expired_session_without_relogin_aborts():
+    s = ScriptedSession([(crawler.ILIAS + "/login.php", LOGIN_PAGE)])
+    with pytest.raises(crawler.SessionExpired):
+        Crawler(s, delay=0)._get(crawler.ILIAS + "/goto.php/fold/1")
+
+
+def test_relogin_failure_aborts_with_message_without_url():
+    s = ScriptedSession([(crawler.ILIAS + "/login.php?sessid=GEHEIM", LOGIN_PAGE)])
+
+    def fail():
+        raise auth.InvalidCredentials("Uni-ID oder Passwort falsch.")
+
+    with pytest.raises(crawler.SessionExpired, match="Passwort falsch") as exc:
+        Crawler(s, delay=0, relogin=fail)._get(crawler.ILIAS + "/goto.php/fold/1")
+    assert "GEHEIM" not in str(exc.value)
+
+
+def test_still_logged_out_after_relogin_aborts():
+    login = (crawler.ILIAS + "/login.php", LOGIN_PAGE)
+    s = ScriptedSession([login, login])
+    with pytest.raises(crawler.SessionExpired, match="auch nach neuem Login"):
+        Crawler(s, delay=0, relogin=lambda: None)._get(crawler.ILIAS + "/goto.php/fold/1")
+
+
+def test_session_expiry_aborts_whole_crawl():
+    s = ScriptedSession([(crawler.ILIAS + "/login.php", LOGIN_PAGE)])
+    with pytest.raises(crawler.SessionExpired):
+        Crawler(s, delay=0).crawl([course(1, "Kurs", crawler.ILIAS + "/goto.php/crs/1")])
+
+
+def test_parallel_expiry_logs_in_only_once():
+    # Drei Threads bekommen gleichzeitig die Login Seite, nur einer loggt neu ein
+    login = (crawler.ILIAS + "/login.php", LOGIN_PAGE)
+    s = ScriptedSession([login, login, login])
+    calls = []
+    barrier = threading.Barrier(3)
+
+    class Synced(Crawler):
+        def _fetch(self, url):
+            r = super()._fetch(url)
+            if len(calls) == 0 and not auth.is_logged_in(r):
+                barrier.wait(timeout=2)
+            return r
+
+    c = Synced(s, delay=0, relogin=lambda: (time.sleep(0.05), calls.append(1)))
+    threads = [threading.Thread(target=c._get, args=(f"{crawler.ILIAS}/goto.php/fold/{i}",)) for i in range(3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert calls == [1]
