@@ -3,3 +3,4 @@ requests==2.34.2
 beautifulsoup4==4.15.0
 keyring==25.7.0
 platformdirs==4.11.12
+tomli-w==1.2.0

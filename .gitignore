@@ -5,3 +5,7 @@ __pycache__/
 build/
 dist/
 *.part
+
+# Lokale Geheimnisse, niemals committen
+.env
+.env.*

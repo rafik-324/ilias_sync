@@ -25,12 +25,12 @@ from typing import Callable
 from urllib.parse import urljoin, urlparse
 
 import keyring
-import platformdirs
 import requests
 from bs4 import BeautifulSoup
 from keyring.errors import PasswordDeleteError
 
-from . import APP_NAME, __version__
+from . import __version__
+from .config import APP_NAME, data_dir
 
 ILIAS = "https://ilias.uni-mannheim.de"
 ILIAS_HOST = urlparse(ILIAS).hostname
@@ -69,10 +69,6 @@ CredentialsProvider = Callable[[], Credentials]
 
 
 # ---------------- Pfade ----------------
-
-def data_dir() -> Path:
-    return Path(platformdirs.user_data_dir(APP_NAME, appauthor=False))
-
 
 def cookie_file() -> Path:
     return data_dir() / "cookies.txt"

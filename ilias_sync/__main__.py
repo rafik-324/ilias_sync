@@ -9,17 +9,17 @@ import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-import platformdirs
 import requests
 from bs4 import BeautifulSoup
 
-from . import APP_NAME, auth
+from . import auth, config
+from .api import Config, ConfigError
 
-log = logging.getLogger(APP_NAME)
+log = logging.getLogger(config.APP_NAME)
 
 
 def setup_logging(verbose: bool = False) -> Path:
-    log_dir = Path(platformdirs.user_log_dir(APP_NAME, appauthor=False))
+    log_dir = config.log_dir()
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "ilias-sync.log"
 
@@ -37,19 +37,43 @@ def setup_logging(verbose: bool = False) -> Path:
     return log_file
 
 
-def console_credentials() -> auth.Credentials:
-    user = input("Uni-ID: ").strip()
+def console_credentials(cfg: Config) -> auth.Credentials:
+    """Uni-ID aus der Config, Passwort aus dem Schlüsselbund. Nur Fehlendes abfragen."""
+    user = cfg.username or input("Uni-ID: ").strip()
     password = auth.load_password(user)
     if password:
         return auth.Credentials(user, password)
+    if cfg.username:
+        print("Uni-ID:", user)
     password = getpass.getpass("Passwort: ")
     remember = input("Passwort im Schlüsselbund speichern? [j/N] ").strip().lower() == "j"
     return auth.Credentials(user, password, remember)
 
 
+def remember_username(cfg: Config, user: str | None) -> None:
+    """Uni-ID nach erfolgreichem Login in der Config merken."""
+    if user and user != cfg.username:
+        cfg.username = user
+        config.save_config(cfg)
+        print("Uni-ID gespeichert in:", config.config_file())
+
+
 def cmd_login() -> int:
     try:
-        s = auth.get_session(console_credentials)
+        cfg = config.load_config()
+    except ConfigError as e:
+        print("FEHLER in der Config:", e)
+        return 1
+
+    used = {}
+
+    def credentials() -> auth.Credentials:
+        creds = console_credentials(cfg)
+        used["user"] = creds.user
+        return creds
+
+    try:
+        s = auth.get_session(credentials)
         r = s.get(auth.DASHBOARD, timeout=auth.TIMEOUT)
     except auth.LoginError as e:
         print("FEHLER:", e)
@@ -57,6 +81,8 @@ def cmd_login() -> int:
     except requests.RequestException as e:
         print("FEHLER: Keine Verbindung zu ILIAS:", type(e).__name__)
         return 1
+
+    remember_username(cfg, used.get("user"))
     title = BeautifulSoup(r.text, "html.parser").title
     print("Login OK")
     print("Seite:", title.get_text(strip=True) if title else auth.safe_url(r.url))
@@ -65,9 +91,14 @@ def cmd_login() -> int:
 
 
 def cmd_logout() -> int:
-    user = input("Uni-ID: ").strip()
+    try:
+        cfg = config.load_config()
+    except ConfigError as e:
+        print("FEHLER in der Config:", e)
+        return 1
+    user = cfg.username or input("Uni-ID: ").strip()
     auth.logout(user)
-    print("Abgemeldet: Passwort und Cookies gelöscht.")
+    print("Abgemeldet: Passwort und Cookies gelöscht. Die Uni-ID bleibt in der Config.")
     return 0
 
 
