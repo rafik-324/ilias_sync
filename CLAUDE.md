@@ -182,19 +182,31 @@ Semester aus Kursname → Semesterordner laut Config (z. B. `HWS 2026` → `01_S
 * Zuordnung ILIAS Kurs (ref_id) → lokaler Kursordner steht in der Config
 * Setup Wizard schlägt Zuordnungen per Fuzzy Match zwischen ILIAS Kursname und vorhandenen Ordnern vor, Nutzer bestätigt
 * Neue, nicht zugeordnete Kurse: GUI Benachrichtigung, bis zur Zuordnung Ablage in `Semesterordner/_Neue_Kurse/<ILIAS Kursname>/`
+* **Eine Veranstaltung besteht in ILIAS aus mehreren Kursen und Gruppen** (so im Testlauf beobachtet), z. B. `Praktische Informatik I [V] [1. PG] (HWS 2026)`, `... [Ü] [1. PG] ...`, `... [T] ...` und die Gruppe `Praktische Informatik I - Tut [1. PG]`. Alle landen im **selben** lokalen Kursordner. Der Fuzzy Match vergleicht deshalb den Namen ohne Semester, ohne Kürzel in eckigen Klammern (`[V]`, `[Ü]`, `[T]`, `[1. PG]`) und ohne Zusätze wie `Große Übung` oder `Tut`
+* Gruppen, die innerhalb eines Kurses liegen, gehören zum Kursordner dieses Kurses
 
 ### 3. Kategorie (Standardregeln, automatisch)
 
-Erste Ebene unter dem Kurs in ILIAS wird per Schlüsselwort erkannt (case insensitive, Umlaute normalisiert, `ue`=`ü`):
+Die Kategorie wird in dieser Reihenfolge bestimmt, das erste Passende gewinnt:
+
+1. **Config Regeln** (Abschnitt 4)
+2. **ILIAS Ordnername per Schlüsselwort** (Tabelle unten), geprüft auf der ersten Ebene unter dem Kurs. Allgemeine Sammelordner wie `Dateien`, `Files`, `Materialien`, `Unterlagen` zählen nicht als Ebene, dort wird eine Ebene tiefer gesucht. So landet z. B. ein Ordner `Tutorien` in einem `[Ü]` Kurs trotzdem unter Tutorium, denn manchmal steckt das Tutorium in der Übung
+3. **Kürzel des ILIAS Kurses** (Vorgabe des Nutzers): `[V]` = Vorlesung, `[Ü]` = Übung, `[T]` = Tutorium. Gilt für Dateien direkt im Kurs und für Ordner ohne Schlüsselwort (diese werden 1:1 als Unterordner der Kategorie übernommen, z. B. `Vorlesung/Studenteninitiativen`)
+4. **Gruppenname per Schlüsselwort** (z. B. `... - Tut [1. PG]` = Tutorium), für Gruppen ohne Kürzel
+5. Nichts davon: ILIAS Ordnername 1:1 direkt im Kursordner
+
+Schlüsselwörter (case insensitive, Umlaute normalisiert, `ue`=`ü`, Vergleich auf ganze Wortteile):
 
 | ILIAS Ordnername enthält | Kategorie |
 |---|---|
 | vorlesung, lecture, slides, folien, skript | Vorlesung |
 | übung, uebung, exercise, übungsgruppe | Übung |
-| tutorium, tutorial | Tutorium |
+| tutorium, tutorien, tutorial, tut | Tutorium |
 | blatt, sheet, übungsblatt, aufgabenblatt | Übungsblätter (falls im Kurs vorhanden, sonst Übung) |
 | abgabe, submission, hausaufgabe | Abgaben |
-| nichts davon | ILIAS Ordnername 1:1 |
+| nichts davon | weiter mit Schritt 3 |
+
+Enthält ein Name Schlüsselwörter mehrerer Kategorien (z. B. `Linux: Folien und Übung`), entscheidet das Kürzel des Kurses, falls es zu einer davon passt, sonst die erste Zeile der Tabelle.
 
 * Existiert lokal bereits ein passender Ordner (Vergleich ohne Nummernpräfix, ohne Groß/Kleinschreibung, Umlaute normalisiert), **diesen verwenden**. Also `02_tutorium` wird für Kategorie Tutorium genutzt, kein zweiter Ordner angelegt
 * Existiert keiner: neuen Ordner mit nächster freier Nummer anlegen, Schreibweise nach Mehrheit im Kurs (z. B. `03_Tutorium`)
