@@ -22,13 +22,43 @@ Desktop App, die automatisch alle Inhalte aus ILIAS der Universität Mannheim he
 * `tomllib` (stdlib) zum Lesen, `tomli-w` zum Schreiben der Config
 * `sqlite3` (stdlib) für den Status Index
 * `PyInstaller` für Builds (`.app` auf macOS, `.exe` auf Windows)
-* `pytest` für Tests
+* `pytest` + `pytest-qt` für Tests, Einstellungen in `pyproject.toml`
+* `ruff` für Linting (Zeilenlänge 120)
+
+## Entwicklung
+
+### Zwei Agenten, zwei Worktrees
+
+Backend und GUI werden parallel von zwei Claude Sitzungen entwickelt. Jede hat ihren eigenen Git Worktree, damit keine die Dateien der anderen verändert (auch nicht bei `rebase` oder `checkout`):
+
+| Ordner | Branch | Wer |
+|---|---|---|
+| `C:\Users\rafik\OneDrive\01_Universität_Mannheim\code_projects\Ilias_getter` | `main` | Backend Agent |
+| `C:\Users\rafik\dev\ilias_sync-gui` (außerhalb von OneDrive) | `gui` | GUI Agent |
+
+* Nur im eigenen Ordner lesen, schreiben, testen und Git Befehle ausführen, immer mit absoluten Pfaden
+* Gemeinsame Dateien (`api.py` Vertrag, `GUI_KONTEXT.md`, `CLAUDE.md`, `requirements*.txt`, `pyproject.toml`) nur klein ändern und in der Commit Nachricht erwähnen
+* `gui` wird regelmäßig nach `main` gemergt (nach getesteten Schritten, nach Rückfrage beim Nutzer), danach `main` in `gui` übernehmen
+
+### Git und GitHub
+
+* Remote: `origin` = `https://github.com/rafik-324/ilias_sync.git` (privat)
+* Commit E-Mail im Repo: `215122369+rafik-324@users.noreply.github.com` (GitHub blockiert Pushes mit der privaten Adresse)
+* Nach getesteten Schritten selbst committen, pushen nur nach Rückfrage
+* Keine Historie umschreiben, solange ein anderer Agent im Repo arbeitet
+
+### Python Umgebung
+
+* Eine gemeinsame venv für beide Agenten: `C:\Users\rafik\.venvs\ilias-sync` (Python 3.13, alle Pakete aus `requirements-dev.txt`). Nicht im Projektordner, weil OneDrive sonst tausende Dateien synchronisiert
+* `python` im PATH ist nur der Microsoft Store Alias, daher immer den vollen Pfad nutzen: `C:\Users\rafik\.venvs\ilias-sync\Scripts\python.exe -m pytest`
+* Tests immer aus dem eigenen Worktree starten, damit dessen Code getestet wird (`pythonpath = ["."]` in `pyproject.toml`)
 
 ## Architektur
 
 ```
 ilias_sync/
-  __main__.py          Einstieg: GUI starten oder CLI Modus (--sync, --dry-run)
+  __main__.py          Einstieg: GUI starten oder CLI Modus (bisher --login, --logout, --crawl
+                       mit --course/--output/-v; --sync und --dry-run folgen mit Meilenstein 3)
   auth.py              Login, Session, Cookies, Keyring (Basis: ilias_login.py)
   crawler.py           ILIAS Kurse und Objekte rekursiv erfassen
   objects/             Handler pro ILIAS Objekttyp
@@ -46,13 +76,22 @@ ilias_sync/
   api.py               Fassade für die GUI: einzige Schnittstelle zwischen GUI und Backend
   gui/
     app.py             Einstieg: QApplication, Einzelinstanz, Tray, Wizard bei Erststart
+    controller.py      Zentraler Zustand, einziger Zugriff auf das Backend, nur ein Sync gleichzeitig
+    logic.py           Qt freie Hilfslogik (Zeiten, Texte, Vorschau Baum, Validierung), ohne QApplication testbar
     tray.py            Tray / Menüleisten Icon + Menü
     window.py          Hauptfenster
+    tab_overview.py    Tabs des Hauptfensters: Übersicht,
+    tab_courses.py       Kurse,
+    tab_preview.py       Vorschau,
+    tab_settings.py      Einstellungen,
+    tab_log.py           Log
+    rules_dialog.py    Regeln pro Kurs bearbeiten
+    widgets.py         Wiederverwendbare Widgets
     setup_wizard.py    Erststart: Login, Basisordner, Kurszuordnung
     worker.py          QThread Worker für Backend Aufrufe
     scheduler_gui.py   QTimer, löst den Intervall Sync aus
     fake_backend.py    Attrappe von api.py für Entwicklung und Tests
-    icons/
+    icons.py           Icons für Tray Zustände
   platform_utils.py    Autostart, Dateinamen, Unicode, Link Dateien
 tests/
   gui/
@@ -345,6 +384,8 @@ Sync läuft immer in einem Worker Thread (`QThread`), die GUI blockiert nie.
 7. **Plattform**: Autostart, Dateinamen/Unicode Tests, Builds für macOS und Windows
 
 Nach jedem Meilenstein lauffähig und getestet, bevor der nächste beginnt.
+
+**Stand (2026-09-24)**: Meilenstein 1 und 2 fertig (Crawler Ausbau mit Parallelität in Arbeit). Als Nächstes Meilenstein 3. GUI (Meilenstein 6) läuft parallel auf Branch `gui` gegen das Fake Backend.
 
 Ausnahme: Die GUI (Meilenstein 6) kann parallel von einem eigenen Agenten gegen `gui/fake_backend.py` entwickelt werden (siehe `GUI_KONTEXT.md`). `api.py` entsteht schrittweise mit den Backend Meilensteinen und ersetzt dann die Attrappe.
 
