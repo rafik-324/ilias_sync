@@ -6,7 +6,7 @@ import logging
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QTimer, QUrl, Signal
+from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
@@ -96,6 +96,10 @@ class Tray(QObject):
         act_quit.triggered.connect(self.quit_requested)
         m.addAction(act_quit)
 
+        if not IS_MAC:
+            # runde Ecken im eigenen Stil (unter macOS zeichnet das System das Menü)
+            m.setWindowFlags(m.windowFlags() | Qt.WindowType.FramelessWindowHint | Qt.WindowType.NoDropShadowWindowHint)
+            m.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.menu = m
         self.icon.setContextMenu(m)
 

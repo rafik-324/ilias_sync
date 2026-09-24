@@ -5,12 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QPalette
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -24,27 +25,29 @@ from PySide6.QtWidgets import (
 )
 
 from ilias_sync.api import ActionKind, InvalidCredentialsError, NetworkError, PlannedAction, Progress
-from ilias_sync.gui import logic
+from ilias_sync.gui import logic, theme
 from ilias_sync.gui.controller import error_text
 from ilias_sync.gui.icons import app_icon
 from ilias_sync.gui.worker import run_task
 
-FEHLER_STIL = "color: #c42b1c;"
-
-ACTION_COLORS: dict[ActionKind, str] = {
-    ActionKind.NEW: "#107c10",
-    ActionKind.UPDATE: "#0063b1",
-    ActionKind.CONFLICT: "#ca5010",
-    ActionKind.SKIP_REMOVED: "#8a8886",
-    ActionKind.SKIP_IGNORED: "#8a8886",
-    ActionKind.CREATE_DIR: "#5c2d91",
-    ActionKind.UNASSIGNED: "#c19c00",
-}
+def action_color(kind: ActionKind) -> str:
+    """Farbe einer geplanten Aktion, passend zum aktuellen Farbmodus."""
+    t = theme.tokens()
+    return {
+        ActionKind.NEW: t.success,
+        ActionKind.UPDATE: t.accent,
+        ActionKind.CONFLICT: t.warning,
+        ActionKind.SKIP_REMOVED: t.faint,
+        ActionKind.SKIP_IGNORED: t.faint,
+        ActionKind.CREATE_DIR: t.muted,
+        ActionKind.UNASSIGNED: t.warning,
+    }[kind]
 
 
 def error_label() -> QLabel:
+    """Fehlerhinweis als dezente rote Box, standardmässig versteckt."""
     lbl = QLabel()
-    lbl.setStyleSheet(FEHLER_STIL)
+    theme.set_role(lbl, "banner-error")
     lbl.setWordWrap(True)
     lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
     lbl.hide()
@@ -53,12 +56,7 @@ def error_label() -> QLabel:
 
 def set_muted(lbl: QLabel) -> None:
     """Abgeschwächte Textfarbe, lesbar im hellen und dunklen Modus."""
-    lbl.setStyleSheet("")
-    pal = lbl.palette()
-    color = QColor(pal.color(QPalette.ColorRole.WindowText))
-    color.setAlphaF(0.62)
-    pal.setColor(QPalette.ColorRole.WindowText, color)
-    lbl.setPalette(pal)
+    theme.set_role(lbl, "muted")
 
 
 def hint_label(text: str = "") -> QLabel:
@@ -68,9 +66,66 @@ def hint_label(text: str = "") -> QLabel:
     return lbl
 
 
+def role_label(text: str, role: str) -> QLabel:
+    lbl = QLabel(text)
+    theme.set_role(lbl, role)
+    return lbl
+
+
 def show_error(lbl: QLabel, text: str | None) -> None:
     lbl.setText(text or "")
     lbl.setVisible(bool(text))
+
+
+def button(text: str, variant: str | None = None) -> QPushButton:
+    btn = QPushButton(text)
+    btn.setCursor(Qt.CursorShape.PointingHandCursor)
+    if variant:
+        theme.set_variant(btn, variant)
+    return btn
+
+
+# ---------------- Layout Bausteine ----------------
+
+class Card(QFrame):
+    """Weisse bzw. dunkle Fläche mit Rand und runden Ecken."""
+
+    def __init__(self, parent: QWidget | None = None, margins: int = 16, spacing: int = 10) -> None:
+        super().__init__(parent)
+        self.setObjectName("card")
+        self.lay = QVBoxLayout(self)
+        self.lay.setContentsMargins(margins, margins, margins, margins)
+        self.lay.setSpacing(spacing)
+
+
+class Page(QWidget):
+    """Seite im Hauptfenster: Titel, Untertitel, rechts optionale Aktionen, darunter Inhalt."""
+
+    def __init__(self, title: str, subtitle: str = "", parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(28, 24, 28, 20)
+        outer.setSpacing(16)
+
+        head = QHBoxLayout()
+        head.setSpacing(8)
+        titles = QVBoxLayout()
+        titles.setSpacing(2)
+        self.title = role_label(title, "title")
+        titles.addWidget(self.title)
+        self.subtitle = role_label(subtitle, "subtitle")
+        self.subtitle.setWordWrap(True)
+        self.subtitle.setVisible(bool(subtitle))
+        titles.addWidget(self.subtitle)
+        head.addLayout(titles, 1)
+        self.actions = QHBoxLayout()
+        self.actions.setSpacing(8)
+        head.addLayout(self.actions)
+        outer.addLayout(head)
+
+        self.body = QVBoxLayout()
+        self.body.setSpacing(14)
+        outer.addLayout(self.body, 1)
 
 
 # ---------------- Fortschritt ----------------
@@ -84,19 +139,19 @@ class ProgressPanel(QWidget):
         super().__init__(parent)
         self.bar = QProgressBar()
         self.bar.setTextVisible(False)
-        self.bar.setMaximumHeight(10)
         self.label = hint_label()
-        self.cancel_btn = QPushButton("Abbrechen")
+        self.cancel_btn = button("Abbrechen", "ghost")
         self.cancel_btn.clicked.connect(self._cancel)
         self.cancel_btn.setVisible(with_cancel)
 
         row = QHBoxLayout()
-        row.addWidget(self.bar, 1)
+        row.addWidget(self.label, 1)
         row.addWidget(self.cancel_btn)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+        lay.addWidget(self.bar)
         lay.addLayout(row)
-        lay.addWidget(self.label)
         self.hide()
 
     def start(self, text: str = "Bitte warten ...") -> None:
@@ -139,33 +194,41 @@ class PreviewTree(QWidget):
         self.only_changes = QCheckBox("Nur Änderungen")
         self.only_changes.setChecked(True)
         self.only_changes.toggled.connect(self._rebuild)
-        self.summary = QLabel()
+        self.summary = role_label("", "section")
         self.summary.setWordWrap(True)
 
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["Name", "Aktion", "Größe"])
         self.tree.setUniformRowHeights(True)
+        self.tree.setIndentation(18)
         header = self.tree.header()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         header.setStretchLastSection(False)
 
-        legend = QLabel(" ".join(
-            f'<span style="color:{ACTION_COLORS[k]}">●</span> {logic.ACTION_LABELS[k]}&nbsp;&nbsp;'
-            for k in ActionKind
-        ))
-        legend.setWordWrap(True)
-        legend.setStyleSheet("font-size: 11px;")
+        self.legend = role_label("", "faint")
+        self.legend.setWordWrap(True)
+        self._update_legend()
+
+        card = Card(margins=0, spacing=0)
+        card.lay.addWidget(self.tree)
 
         top = QHBoxLayout()
         top.addWidget(self.summary, 1)
         top.addWidget(self.only_changes)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(10)
         lay.addLayout(top)
-        lay.addWidget(self.tree, 1)
-        lay.addWidget(legend)
+        lay.addWidget(card, 1)
+        lay.addWidget(self.legend)
+
+    def _update_legend(self) -> None:
+        self.legend.setText("&nbsp;&nbsp;&nbsp;".join(
+            f'<span style="color:{action_color(k)}">●</span>&nbsp;{logic.ACTION_LABELS[k]}'
+            for k in ActionKind
+        ))
 
     def set_actions(self, actions: list[PlannedAction], root: Path | None) -> None:
         self.actions = actions
@@ -180,6 +243,7 @@ class PreviewTree(QWidget):
 
     def _rebuild(self) -> None:
         self.tree.clear()
+        self._update_legend()
         tree = logic.build_preview_tree(self.actions, self.root, self.only_changes.isChecked())
         self._add_children(self.tree.invisibleRootItem(), tree, depth=0)
 
@@ -190,7 +254,7 @@ class PreviewTree(QWidget):
                 kind = child.action.kind
                 item.setText(1, logic.ACTION_LABELS[kind])
                 item.setText(2, logic.format_size(child.action.size))
-                item.setForeground(1, QBrush(QColor(ACTION_COLORS[kind])))
+                item.setForeground(1, QBrush(QColor(action_color(kind))))
                 item.setToolTip(0, child.action.ilias_path)
                 item.setToolTip(1, logic.ACTION_HINTS[kind])
             else:
@@ -219,7 +283,7 @@ class LoginForm(QWidget):
         self.remember = QCheckBox("Passwort im Schlüsselbund speichern")
         self.remember.setChecked(True)
         self.remember.setToolTip("Nötig für den automatischen Sync im Hintergrund.")
-        self.button = QPushButton("Anmelden")
+        self.button = button("Anmelden", "primary")
         self.button.setDefault(True)
         self.button.clicked.connect(self.submit)
         self.password.returnPressed.connect(self.submit)
@@ -227,6 +291,8 @@ class LoginForm(QWidget):
         self.status.setWordWrap(True)
 
         form = QFormLayout()
+        form.setVerticalSpacing(10)
+        form.setHorizontalSpacing(14)
         form.addRow("Uni-ID", self.user)
         form.addRow("Passwort", self.password)
         form.addRow("", self.remember)
@@ -278,7 +344,7 @@ class LoginForm(QWidget):
 
     def _set_status(self, text: str, error: bool = False, ok: bool = False) -> None:
         self.status.setText(text)
-        self.status.setStyleSheet(FEHLER_STIL if error else ("color: #107c10;" if ok else ""))
+        theme.set_role(self.status, "error" if error else ("success" if ok else "muted"))
 
 
 class LoginDialog(QDialog):
@@ -292,7 +358,11 @@ class LoginDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
         buttons.rejected.connect(self.reject)
         lay = QVBoxLayout(self)
-        lay.addWidget(QLabel("Die Anmeldung bei ILIAS ist abgelaufen oder das Passwort hat sich geändert."))
+        lay.setContentsMargins(24, 22, 24, 18)
+        lay.setSpacing(14)
+        lay.addWidget(role_label("Bei ILIAS anmelden", "hero"))
+        hint = hint_label("Die Anmeldung ist abgelaufen oder das Passwort hat sich geändert.")
+        lay.addWidget(hint)
         lay.addWidget(self.form)
         lay.addWidget(buttons)
         if user:

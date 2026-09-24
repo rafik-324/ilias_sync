@@ -26,7 +26,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
-    QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -35,10 +34,19 @@ from PySide6.QtWidgets import (
 )
 
 from ilias_sync.api import BaseDirCheck, CourseConfig, IliasCourse, MappingSuggestion, PlannedAction
-from ilias_sync.gui import logic
+from ilias_sync.gui import logic, theme
 from ilias_sync.gui.controller import error_text
 from ilias_sync.gui.icons import app_icon
-from ilias_sync.gui.widgets import LoginForm, PreviewTree, ProgressPanel, error_label, hint_label, show_error
+from ilias_sync.gui.widgets import (
+    LoginForm,
+    PreviewTree,
+    ProgressPanel,
+    button,
+    error_label,
+    hint_label,
+    role_label,
+    show_error,
+)
 from ilias_sync.gui.worker import run_task
 
 log = logging.getLogger(__name__)
@@ -93,7 +101,7 @@ class BaseDirPage(QWizardPage):
         self.path = QLineEdit()
         self.path.setPlaceholderText("z. B. C:\\Users\\name\\OneDrive oder ~/Documents")
         self.path.textChanged.connect(self._schedule_check)
-        browse = QPushButton("Durchsuchen ...")
+        browse = button("Durchsuchen ...")
         browse.clicked.connect(self._browse)
         row = QHBoxLayout()
         row.addWidget(self.path, 1)
@@ -103,12 +111,13 @@ class BaseDirPage(QWizardPage):
         self.status.setWordWrap(True)
         self.structure = QLabel()
         self.structure.setTextFormat(Qt.TextFormat.PlainText)
-        self.structure.setStyleSheet("font-family: monospace; padding: 8px; background: palette(base);")
+        theme.set_role(self.structure, "code")
 
         lay = QVBoxLayout(self)
         lay.addLayout(row)
         lay.addWidget(self.status)
-        lay.addWidget(QLabel("So wird es aussehen:"))
+        lay.addSpacing(6)
+        lay.addWidget(role_label("So wird es aussehen", "section"))
         lay.addWidget(self.structure)
         lay.addStretch(1)
         lay.addWidget(hint_label("Der Ordner kann später in den Einstellungen geändert werden. "
@@ -146,7 +155,7 @@ class BaseDirPage(QWizardPage):
         if path is None:
             self._check = None
             self.status.setText("Bitte einen Ordner wählen.")
-            self.status.setStyleSheet("")
+            theme.set_role(self.status, "muted")
             self.structure.setText("")
             self.completeChanged.emit()
             return
@@ -154,17 +163,17 @@ class BaseDirPage(QWizardPage):
         c = self._check
         if c.exists and not c.writable:
             self.status.setText(c.message or "In diesen Ordner darf nicht geschrieben werden.")
-            self.status.setStyleSheet("color: #c42b1c;")
+            theme.set_role(self.status, "error")
         elif not c.exists:
             self.status.setText("Der Ordner existiert noch nicht und wird nach Rückfrage angelegt.")
-            self.status.setStyleSheet("color: #ca5010;")
+            theme.set_role(self.status, "warning")
         elif c.has_root_folder:
             sem = ", ".join(c.existing_semesters) or "keine"
             self.status.setText(f"Vorhandener Ordner {self.root_name} gefunden (Semester: {sem}). Er wird weiterverwendet.")
-            self.status.setStyleSheet("color: #107c10;")
+            theme.set_role(self.status, "success")
         else:
             self.status.setText(f"Ordner ist nutzbar. {self.root_name} wird darin angelegt.")
-            self.status.setStyleSheet("color: #107c10;")
+            theme.set_role(self.status, "success")
         sems = c.existing_semesters or ["01_SEMESTER"]
         lines = [str(path), f"└── {self.root_name}/"]
         for i, s in enumerate(sems):
@@ -221,7 +230,7 @@ class CoursesPage(QWizardPage):
 
         self.progress = ProgressPanel(with_cancel=False)
         self.error = error_label()
-        self.retry = QPushButton("Erneut versuchen")
+        self.retry = button("Erneut versuchen")
         self.retry.clicked.connect(self._load)
         self.retry.hide()
 
@@ -454,6 +463,14 @@ class SetupWizard(QWizard):
         self.addPage(PreviewPage(api))
         self.finish_page = FinishPage()
         self.addPage(self.finish_page)
+
+        # grössere Seitentitel im Stil des Hauptfensters
+        self.setTitleFormat(Qt.TextFormat.RichText)
+        self.setSubTitleFormat(Qt.TextFormat.RichText)
+        for page_id in self.pageIds():
+            page = self.page(page_id)
+            page.setTitle(f'<span style="font-size:20px; font-weight:600;">{page.title()}</span>')
+            page.setSubTitle(f'<span style="font-size:13px;">{page.subTitle()}</span>')
 
     def start_sync_requested(self) -> bool:
         return self.finish_page.start_now.isChecked()

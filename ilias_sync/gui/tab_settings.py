@@ -6,7 +6,7 @@ import logging
 from copy import deepcopy
 from pathlib import Path
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QFileDialog,
@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QMessageBox,
-    QPushButton,
     QScrollArea,
     QSpinBox,
     QVBoxLayout,
@@ -26,18 +25,27 @@ from PySide6.QtWidgets import (
 )
 
 from ilias_sync.api import ConfigError
-from ilias_sync.gui import logic
+from ilias_sync.gui import logic, theme
 from ilias_sync.gui.controller import Controller, error_text
-from ilias_sync.gui.widgets import error_label, hint_label, set_muted, show_error
+from ilias_sync.gui.widgets import Page, button, error_label, hint_label, set_muted, show_error
 
 log = logging.getLogger(__name__)
 
 
-class SettingsTab(QWidget):
+def _form(box: QGroupBox) -> QFormLayout:
+    form = QFormLayout(box)
+    form.setContentsMargins(0, 8, 0, 0)
+    form.setHorizontalSpacing(18)
+    form.setVerticalSpacing(12)
+    form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+    return form
+
+
+class SettingsTab(Page):
     login_requested = Signal()
 
     def __init__(self, controller: Controller, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
+        super().__init__("Einstellungen", "Ablage, Synchronisierung und Konto.", parent)
         self.c = controller
         self.dirty = False
         self._loading = False
@@ -47,7 +55,7 @@ class SettingsTab(QWidget):
         # Ablage
         self.base_dir = QLineEdit()
         self.base_dir.setReadOnly(True)
-        btn_base = QPushButton("Ändern ...")
+        btn_base = button("Ändern ...")
         btn_base.clicked.connect(self._change_base_dir)
         base_row = QHBoxLayout()
         base_row.addWidget(self.base_dir, 1)
@@ -56,7 +64,7 @@ class SettingsTab(QWidget):
         self.root_name.textEdited.connect(self._changed)
 
         box_storage = QGroupBox("Ablage")
-        f1 = QFormLayout(box_storage)
+        f1 = _form(box_storage)
         f1.addRow("Basisordner", base_row)
         f1.addRow("Name des Uni Ordners", self.root_name)
         f1.addRow("", hint_label("Wird unter dem Basisordner angelegt bzw. weiterverwendet."))
@@ -78,7 +86,7 @@ class SettingsTab(QWidget):
         self.autostart.toggled.connect(self._changed)
 
         box_sync = QGroupBox("Synchronisierung")
-        f2 = QFormLayout(box_sync)
+        f2 = _form(box_sync)
         f2.addRow("Intervall", self.interval)
         f2.addRow("Parallelität", self.parallel)
         f2.addRow("Semester Muster", self.pattern)
@@ -87,10 +95,11 @@ class SettingsTab(QWidget):
 
         # Ignorieren
         self.ignore = QListWidget()
-        self.ignore.setMaximumHeight(110)
-        btn_ign_add = QPushButton("Hinzufügen")
+        self.ignore.setObjectName("plainList")
+        self.ignore.setMaximumHeight(130)
+        btn_ign_add = button("Hinzufügen")
         btn_ign_add.clicked.connect(self._add_ignore)
-        btn_ign_del = QPushButton("Entfernen")
+        btn_ign_del = button("Entfernen", "ghost")
         btn_ign_del.clicked.connect(self._remove_ignore)
         ign_buttons = QVBoxLayout()
         ign_buttons.addWidget(btn_ign_add)
@@ -101,15 +110,17 @@ class SettingsTab(QWidget):
         ign_row.addLayout(ign_buttons)
         box_ignore = QGroupBox("Ignorierte lokale Ordner")
         v3 = QVBoxLayout(box_ignore)
+        v3.setContentsMargins(0, 8, 0, 0)
+        v3.setSpacing(10)
         v3.addWidget(hint_label("Diese Ordner werden nie betreten oder beschrieben, z. B. eigene Arbeit. "
                                 "Muster mit * erlaubt."))
         v3.addLayout(ign_row)
 
         # Konto
         self.account = QLabel()
-        self.btn_login = QPushButton("Anmelden ...")
+        self.btn_login = button("Anmelden ...", "primary")
         self.btn_login.clicked.connect(self.login_requested)
-        self.btn_logout = QPushButton("Abmelden")
+        self.btn_logout = button("Abmelden", "danger")
         self.btn_logout.clicked.connect(self._logout)
         acc_row = QHBoxLayout()
         acc_row.addWidget(self.account, 1)
@@ -117,13 +128,13 @@ class SettingsTab(QWidget):
         acc_row.addWidget(self.btn_logout)
         box_account = QGroupBox("Konto")
         v4 = QVBoxLayout(box_account)
+        v4.setContentsMargins(0, 8, 0, 0)
         v4.addLayout(acc_row)
 
         # Speichern
-        self.btn_discard = QPushButton("Verwerfen")
+        self.btn_discard = button("Verwerfen", "ghost")
         self.btn_discard.clicked.connect(self.load)
-        self.btn_save = QPushButton("Speichern")
-        self.btn_save.setDefault(True)
+        self.btn_save = button("Speichern", "primary")
         self.btn_save.clicked.connect(self.save)
         save_row = QHBoxLayout()
         save_row.addStretch(1)
@@ -132,6 +143,8 @@ class SettingsTab(QWidget):
 
         content = QWidget()
         inner = QVBoxLayout(content)
+        inner.setContentsMargins(0, 0, 8, 0)
+        inner.setSpacing(4)
         inner.addWidget(self.error)
         inner.addWidget(box_storage)
         inner.addWidget(box_sync)
@@ -143,13 +156,8 @@ class SettingsTab(QWidget):
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setWidget(content)
 
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.addWidget(scroll, 1)
-        bottom = QWidget()
-        bl = QVBoxLayout(bottom)
-        bl.addLayout(save_row)
-        lay.addWidget(bottom)
+        self.body.addWidget(scroll, 1)
+        self.body.addLayout(save_row)
 
         self.c.config_changed.connect(self._on_config_changed)
         self.c.state_changed.connect(self._refresh_account)
@@ -209,7 +217,7 @@ class SettingsTab(QWidget):
         err = logic.regex_error(self.pattern.text())
         if err:
             self.pattern_hint.setText(f"Ungültig: {err}")
-            self.pattern_hint.setStyleSheet("color: #c42b1c;")
+            theme.set_role(self.pattern_hint, "error")
         else:
             self.pattern_hint.setText(r"Erkennt z. B. (HWS 2026) oder (FSS 2027). Gruppe 1: Semesterart, Gruppe 2: Jahr.")
             set_muted(self.pattern_hint)

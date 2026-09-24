@@ -324,3 +324,15 @@ def find_existing_base(root_folder_name: str, home: Path | None = None) -> Path 
         except OSError:
             continue
     return None
+
+
+def contents_summary(flags: list[tuple[str, bool]]) -> str:
+    """Kurzfassung der aktiven Inhaltstypen, z. B. "Alles" oder "Ohne Videos"."""
+    off = [label for label, on in flags if not on]
+    if not off:
+        return "Alles"
+    if len(off) == len(flags):
+        return "Nichts"
+    if len(off) <= 2:
+        return "Ohne " + " und ".join(off)
+    return f"{len(flags) - len(off)} von {len(flags)}"

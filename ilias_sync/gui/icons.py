@@ -165,3 +165,128 @@ def app_icon() -> QIcon:
 def status_pixmap(state: IconState, size: int = 20) -> QPixmap:
     """Farbiges Status Symbol für das Fenster (unabhängig von der Plattform)."""
     return _render(size, state, 0, False, is_dark_mode())
+
+
+# ---------------- Navigation und Status (modernes Layout) ----------------
+
+def _line_pen(color: QColor, width: float = 1.8) -> QPen:
+    return QPen(color, width, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+
+
+def _draw_nav(p: QPainter, name: str, color: QColor) -> None:
+    """Linien Icons im 24er Koordinatensystem."""
+    p.setPen(_line_pen(color))
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    if name == "overview":
+        path = QPainterPath()
+        path.moveTo(4, 11)
+        path.lineTo(12, 4.5)
+        path.lineTo(20, 11)
+        p.drawPath(path)
+        p.drawRoundedRect(QRectF(6.5, 10, 11, 9.5), 1.5, 1.5)
+    elif name == "courses":
+        path = QPainterPath()
+        path.moveTo(3.5, 7)
+        path.lineTo(3.5, 18)
+        path.quadTo(3.5, 19.5, 5, 19.5)
+        path.lineTo(19, 19.5)
+        path.quadTo(20.5, 19.5, 20.5, 18)
+        path.lineTo(20.5, 9.5)
+        path.quadTo(20.5, 8, 19, 8)
+        path.lineTo(11.5, 8)
+        path.lineTo(9.5, 5.5)
+        path.lineTo(5, 5.5)
+        path.quadTo(3.5, 5.5, 3.5, 7)
+        p.drawPath(path)
+    elif name == "preview":
+        path = QPainterPath()
+        path.moveTo(2.5, 12)
+        path.quadTo(12, 3, 21.5, 12)
+        path.quadTo(12, 21, 2.5, 12)
+        p.drawPath(path)
+        p.drawEllipse(QPointF(12, 12), 3, 3)
+    elif name == "settings":
+        for y, x in ((7, 15), (12, 8), (17, 13)):
+            p.drawLine(QPointF(4, y), QPointF(20, y))
+            p.setBrush(color)
+            p.drawEllipse(QPointF(x, y), 2.2, 2.2)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+    elif name == "log":
+        p.drawRoundedRect(QRectF(5, 3.5, 14, 17), 2, 2)
+        for y in (8.5, 12, 15.5):
+            p.drawLine(QPointF(8.5, y), QPointF(15.5, y))
+
+
+def _nav_pixmap(name: str, color: QColor, size: int) -> QPixmap:
+    ratio = 2
+    pm = QPixmap(size * ratio, size * ratio)
+    pm.setDevicePixelRatio(ratio)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.scale(size / 24, size / 24)
+    _draw_nav(p, name, color)
+    p.end()
+    return pm
+
+
+def nav_icon(name: str, normal: str, selected: str, size: int = 18) -> QIcon:
+    """Navigations Icon mit eigener Farbe für den ausgewählten Zustand."""
+    icon = QIcon()
+    icon.addPixmap(_nav_pixmap(name, QColor(normal), size), QIcon.Mode.Normal)
+    icon.addPixmap(_nav_pixmap(name, QColor(selected), size), QIcon.Mode.Selected)
+    icon.addPixmap(_nav_pixmap(name, QColor(selected), size), QIcon.Mode.Active)
+    return icon
+
+
+def status_badge(state: IconState, fg: str, bg: str, size: int = 44, frame: int = 0) -> QPixmap:
+    """Rundes Status Symbol für die Übersicht (Hintergrund soft, Zeichen farbig)."""
+    ratio = 2
+    pm = QPixmap(size * ratio, size * ratio)
+    pm.setDevicePixelRatio(ratio)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.scale(size / 24, size / 24)
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QColor(bg))
+    p.drawEllipse(QRectF(0, 0, 24, 24))
+    color = QColor(fg)
+    p.setPen(_line_pen(color, 2.0))
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    if state == IconState.READY:
+        path = QPainterPath()
+        path.moveTo(7.5, 12.5)
+        path.lineTo(10.5, 15.5)
+        path.lineTo(16.5, 9)
+        p.drawPath(path)
+    elif state == IconState.SYNCING:
+        # rotierender Bogen
+        p.drawArc(QRectF(7, 7, 10, 10), (90 - frame * 45) * 16, 270 * 16)
+    elif state == IconState.ERROR:
+        p.drawLine(QPointF(12, 7.5), QPointF(12, 13))
+        p.setBrush(color)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawEllipse(QPointF(12, 16.3), 1.3, 1.3)
+    elif state == IconState.LOGIN:
+        p.drawRoundedRect(QRectF(8, 11, 8, 6.5), 1.2, 1.2)
+        p.drawArc(QRectF(9.5, 6.5, 5, 8), 0, 180 * 16)
+    elif state == IconState.PAUSED:
+        p.drawLine(QPointF(10, 8.5), QPointF(10, 15.5))
+        p.drawLine(QPointF(14, 8.5), QPointF(14, 15.5))
+    p.end()
+    return pm
+
+
+def dot(color: str, size: int = 8) -> QPixmap:
+    ratio = 2
+    pm = QPixmap(size * ratio, size * ratio)
+    pm.setDevicePixelRatio(ratio)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QColor(color))
+    p.drawEllipse(QRectF(0, 0, size, size))
+    p.end()
+    return pm

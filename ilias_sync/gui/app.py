@@ -20,6 +20,7 @@ from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
 
 from ilias_sync import __version__
+from ilias_sync.gui import theme
 from ilias_sync.gui.controller import Controller
 from ilias_sync.gui.icons import app_icon
 from ilias_sync.gui.scheduler_gui import Scheduler
@@ -199,6 +200,7 @@ def run(api, argv: list[str] | None = None, show_window: bool = False) -> int:
     app = QApplication.instance() or QApplication(argv or sys.argv)
     app.setQuitOnLastWindowClosed(False)
     app.setWindowIcon(app_icon())
+    theme.apply(app)
 
     holder: dict[str, GuiApp] = {}
     single = SingleInstance(lambda: holder["gui"].wake() if "gui" in holder else None)

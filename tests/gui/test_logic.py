@@ -195,3 +195,18 @@ def test_next_due():
     # nach dem Ruhezustand: überfälliger Termin liegt in der Vergangenheit, also sofort fällig
     old = NOW - timedelta(hours=5)
     assert next_due(old, 60, NOW - timedelta(hours=6)) < NOW
+
+
+@pytest.mark.parametrize(
+    "off, expected",
+    [
+        ([], "Alles"),
+        (["Videos"], "Ohne Videos"),
+        (["Videos", "Foren"], "Ohne Videos und Foren"),
+        (["Videos", "Foren", "Weblinks"], "3 von 6"),
+        (["Dateien", "Videos", "Übungen", "Weblinks", "Foren", "Sonstiges"], "Nichts"),
+    ],
+)
+def test_contents_summary(off, expected):
+    labels = ["Dateien", "Videos", "Übungen", "Weblinks", "Foren", "Sonstiges"]
+    assert logic.contents_summary([(label, label not in off) for label in labels]) == expected

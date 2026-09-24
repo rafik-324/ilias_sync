@@ -7,10 +7,11 @@ from pathlib import Path
 
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QFontDatabase, QGuiApplication, QTextCursor
-from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QComboBox, QPlainTextEdit, QWidget
 
 from ilias_sync.gui.controller import Controller
 from ilias_sync.gui.tray import open_path
+from ilias_sync.gui.widgets import Card, Page, button
 
 MAX_LINES = 500
 
@@ -37,9 +38,9 @@ def filter_lines(lines: list[str], mode: str) -> list[str]:
     return [line for line in lines if any(k in line for k in keys)]
 
 
-class LogTab(QWidget):
+class LogTab(Page):
     def __init__(self, controller: Controller, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
+        super().__init__("Log", "Letzte Meldungen. Passwörter und Cookies werden nie protokolliert.", parent)
         self.c = controller
         self._mtime: float | None = None
         self._lines: list[str] = []
@@ -47,27 +48,27 @@ class LogTab(QWidget):
         self.filter = QComboBox()
         self.filter.addItems([FILTER_ALLE, FILTER_WARNUNGEN, FILTER_FEHLER])
         self.filter.currentTextChanged.connect(lambda _t: self._render())
-        btn_copy = QPushButton("Kopieren")
+        btn_copy = button("Kopieren", "ghost")
         btn_copy.clicked.connect(self._copy)
-        btn_folder = QPushButton("Log Ordner öffnen")
+        btn_folder = button("Log Ordner öffnen")
         btn_folder.clicked.connect(lambda: open_path(self.c.api.log_dir()))
 
-        top = QHBoxLayout()
-        top.addWidget(QLabel("Anzeigen:"))
-        top.addWidget(self.filter)
-        top.addStretch(1)
-        top.addWidget(btn_copy)
-        top.addWidget(btn_folder)
+        self.filter.setMinimumWidth(190)
+        self.actions.addWidget(self.filter)
+        self.actions.addWidget(btn_copy)
+        self.actions.addWidget(btn_folder)
 
         self.text = QPlainTextEdit()
         self.text.setReadOnly(True)
         self.text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         self.text.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
         self.text.setPlaceholderText("Noch keine Meldungen.")
+        self.text.setObjectName("logView")
+        self.text.setFrameShape(QPlainTextEdit.Shape.NoFrame)
 
-        lay = QVBoxLayout(self)
-        lay.addLayout(top)
-        lay.addWidget(self.text, 1)
+        card = Card(margins=4, spacing=0)
+        card.lay.addWidget(self.text)
+        self.body.addWidget(card, 1)
 
         self._timer = QTimer(self)
         self._timer.setInterval(2000)

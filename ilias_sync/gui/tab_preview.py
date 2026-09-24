@@ -2,27 +2,25 @@
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QHBoxLayout, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QWidget
 
 from ilias_sync.api import PlannedAction
 from ilias_sync.gui.controller import Controller
-from ilias_sync.gui.widgets import PreviewTree, ProgressPanel, error_label, hint_label, show_error
+from ilias_sync.gui.widgets import Page, PreviewTree, ProgressPanel, button, error_label, show_error
 
 
-class PreviewTab(QWidget):
+class PreviewTab(Page):
     def __init__(self, controller: Controller, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
+        super().__init__("Vorschau", "So würden neue Dateien einsortiert. Dabei wird nichts geschrieben.", parent)
         self.c = controller
 
-        self.btn_preview = QPushButton("Vorschau erstellen")
+        self.btn_preview = button("Vorschau erstellen")
         self.btn_preview.clicked.connect(self._start)
-        self.btn_sync = QPushButton("Jetzt so synchronisieren")
+        self.btn_sync = button("Jetzt so synchronisieren", "primary")
         self.btn_sync.setEnabled(False)
         self.btn_sync.clicked.connect(self._sync)
 
-        top = QHBoxLayout()
-        top.addWidget(self.btn_preview)
-        top.addWidget(hint_label("Zeigt, wie neue Dateien einsortiert würden. Es wird nichts geschrieben."), 1)
+        self.actions.addWidget(self.btn_preview)
 
         self.progress = ProgressPanel()
         self.progress.cancel_clicked.connect(self.c.cancel)
@@ -33,12 +31,10 @@ class PreviewTab(QWidget):
         bottom.addStretch(1)
         bottom.addWidget(self.btn_sync)
 
-        lay = QVBoxLayout(self)
-        lay.addLayout(top)
-        lay.addWidget(self.progress)
-        lay.addWidget(self.error)
-        lay.addWidget(self.tree, 1)
-        lay.addLayout(bottom)
+        self.body.addWidget(self.progress)
+        self.body.addWidget(self.error)
+        self.body.addWidget(self.tree, 1)
+        self.body.addLayout(bottom)
 
         self._waiting = False
         self.c.dry_run_finished.connect(self._done)

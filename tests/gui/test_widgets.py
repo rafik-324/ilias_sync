@@ -88,10 +88,10 @@ def test_hauptfenster_tabs(qtbot, fake):
     w = MainWindow(c)
     qtbot.addWidget(w)
     w.show_tab("courses")
-    assert w.tabs.currentWidget() is w.courses
+    assert w.current_page() is w.courses
     assert w.courses.table.rowCount() == 6
     w.show_tab("log")
-    assert w.tabs.currentWidget() is w.log
+    assert w.current_page() is w.log
     # Übersicht zeigt die Beispieldaten
     assert w.overview.table.rowCount() == 5
 
@@ -104,11 +104,11 @@ def test_ungespeicherte_aenderungen_verhindern_tabwechsel(qtbot, fake, monkeypat
     w.settings.interval.setValue(120)
     assert w.settings.dirty
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Cancel)
-    w.tabs.setCurrentIndex(0)
-    assert w.tabs.currentWidget() is w.settings
+    w.select(0)
+    assert w.current_page() is w.settings
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Save)
-    w.tabs.setCurrentIndex(0)
-    assert w.tabs.currentWidget() is w.overview
+    w.select(0)
+    assert w.current_page() is w.overview
     assert fake.load_config().sync_interval_minutes == 120
 
 
@@ -128,7 +128,7 @@ def test_nicht_zugeordneter_kurs_nach_sync(qtbot, fake):
     with qtbot.waitSignal(c.sync_finished, timeout=10_000):
         c.start_sync()
     assert w.courses.table.rowCount() == 7
-    assert "neu" in w.tabs.tabText(1)
+    assert "neu" in w.nav.item(1).text()
 
 
 def test_wizard_login_seite(qtbot, fake_first_run):

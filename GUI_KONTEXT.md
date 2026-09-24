@@ -24,6 +24,7 @@ ilias_sync/gui/
   setup_wizard.py     Erststart Assistent
   worker.py           QThread Worker für alle Backend Aufrufe, die länger dauern können
   scheduler_gui.py    QTimer, der den Intervall Sync auslöst (nutzt Werte aus der Config)
+  theme.py            Design System: Farb Tokens hell/dunkel, zentrales Stylesheet, Qt Stil Fusion
   icons.py            Platzhalter Icons per QPainter (hell, dunkel, macOS Template), siehe Abschnitt 8
   fake_backend.py     Attrappe des Backends für Entwicklung und Tests
 tests/gui/            Tests für die GUI Logik und Widgets (pytest-qt)

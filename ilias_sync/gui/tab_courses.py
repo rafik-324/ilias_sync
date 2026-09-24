@@ -6,16 +6,16 @@ import logging
 import re
 from copy import deepcopy
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QBrush, QColor
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
+    QFrame,
     QHBoxLayout,
     QHeaderView,
     QInputDialog,
-    QLabel,
     QMessageBox,
     QPushButton,
     QTableWidget,
@@ -25,10 +25,11 @@ from PySide6.QtWidgets import (
 )
 
 from ilias_sync.api import Config, ConfigError, CourseConfig, IliasCourse, SyncResult
-from ilias_sync.gui import logic
+from ilias_sync.gui import logic, theme
 from ilias_sync.gui.controller import Controller, error_text
+from ilias_sync.gui.icons import dot
 from ilias_sync.gui.rules_dialog import RulesDialog
-from ilias_sync.gui.widgets import ProgressPanel, error_label, hint_label, show_error
+from ilias_sync.gui.widgets import Card, Page, ProgressPanel, button, error_label, hint_label, role_label, show_error
 from ilias_sync.gui.worker import run_task
 
 log = logging.getLogger(__name__)
@@ -45,12 +46,9 @@ TYPE_COLUMNS: list[tuple[str, str]] = [
     ("download_forums", "Foren"),
     ("download_other", "Sonstiges"),
 ]
-COL_NAME, COL_SEM, COL_DIR = 0, 1, 2
-COL_FIRST_TYPE = 3
-COL_RULES = COL_FIRST_TYPE + len(TYPE_COLUMNS)
+COL_NAME, COL_SEM, COL_DIR, COL_TYPES, COL_RULES = range(5)
 
 STANDARD_KATEGORIEN = ["01_Vorlesung", "02_Übung", "03_Tutorium", "03_Übungsblätter", "04_Abgaben"]
-UNASSIGNED_BG = QColor(255, 196, 0, 45)
 
 
 def semester_of(name: str, pattern: str) -> str | None:
@@ -63,70 +61,135 @@ def semester_of(name: str, pattern: str) -> str | None:
     return f"{m.group(1)} {m.group(2)}"
 
 
-class CoursesTab(QWidget):
+class ContentsPopup(QFrame):
+    """Aufklappfeld mit einem Schalter pro Inhaltstyp, Änderungen gelten sofort."""
+
+    def __init__(self, course: CourseConfig, on_change, parent: QWidget | None = None) -> None:
+        super().__init__(parent, Qt.WindowType.Popup)
+        self.setObjectName("card")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(8)
+        lay.addWidget(role_label("Was soll geladen werden?", "section"))
+        for field, title in TYPE_COLUMNS:
+            box = QCheckBox(title)
+            box.setChecked(getattr(course, field))
+            box.toggled.connect(lambda on, f=field: on_change(f, on))
+            lay.addWidget(box)
+
+
+class ContentsButton(QPushButton):
+    def __init__(self, course: CourseConfig, on_change) -> None:
+        super().__init__()
+        self.course = course
+        self._on_change = on_change
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("Inhaltstypen für diesen Kurs wählen")
+        self.clicked.connect(self._open)
+        self.refresh()
+
+    def refresh(self) -> None:
+        flags = [(title, getattr(self.course, field)) for field, title in TYPE_COLUMNS]
+        self.setText(logic.contents_summary(flags) + "  ▾")
+
+    def _changed(self, field: str, on: bool) -> None:
+        self._on_change(self.course, field, on)
+        self.refresh()
+
+    def _open(self) -> None:
+        popup = ContentsPopup(self.course, self._changed, self)
+        popup.adjustSize()
+        popup.move(self.mapToGlobal(self.rect().bottomLeft()))
+        popup.show()
+
+
+def _cell(widget: QWidget, center: bool = False) -> QWidget:
+    """Zell Widget mit etwas Luft, damit Eingaben nicht am Rand kleben."""
+    cell = QWidget()
+    cl = QHBoxLayout(cell)
+    cl.setContentsMargins(6, 4, 6, 4)
+    if center:
+        cl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    cl.addWidget(widget)
+    return cell
+
+
+class CoursesTab(Page):
     def __init__(self, controller: Controller, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
+        super().__init__("Kurse", "Welcher ILIAS Kurs in welchem Ordner landet und was davon geladen wird.", parent)
         self.c = controller
         self.cfg: Config | None = None
         self.dirty = False
         self._filling = False
 
-        self.hint = QLabel()
+        self.hint = role_label("", "banner")
         self.hint.setWordWrap(True)
-        self.hint.setStyleSheet("background: rgba(255,196,0,0.18); padding: 6px; border-radius: 4px;")
         self.hint.hide()
 
         self.table = QTableWidget(0, COL_RULES + 1)
-        self.table.setHorizontalHeaderLabels(
-            ["ILIAS Kurs", "Semester", "Lokaler Ordner"] + [t for _, t in TYPE_COLUMNS] + [""]
-        )
+        self.table.setHorizontalHeaderLabels(["ILIAS Kurs", "Semester", "Lokaler Ordner", "Inhalte", ""])
         self.table.verticalHeader().hide()
+        self.table.verticalHeader().setDefaultSectionSize(46)
+        self.table.setShowGrid(False)
+        self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.table.setWordWrap(False)
+        self.table.setIconSize(QSize(8, 8))
+        self.table.horizontalHeader().setHighlightSections(False)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         h = self.table.horizontalHeader()
+        h.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         h.setSectionResizeMode(COL_NAME, QHeaderView.ResizeMode.Stretch)
-        for col in range(COL_SEM, COL_RULES + 1):
-            h.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+        for col, width in ((COL_SEM, 92), (COL_DIR, 250), (COL_TYPES, 150), (COL_RULES, 128)):
+            h.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            self.table.setColumnWidth(col, width)
 
         # Semester Zuordnung
-        sem_title = QLabel("Semester Ordner")
-        sem_title.setStyleSheet("font-weight: 600;")
+        sem_title = role_label("Semester Ordner", "section")
         self.sem_table = QTableWidget(0, 2)
         self.sem_table.setHorizontalHeaderLabels(["Semester (aus Kursname)", "Ordner"])
         self.sem_table.verticalHeader().hide()
+        self.sem_table.verticalHeader().setDefaultSectionSize(34)
+        self.sem_table.setShowGrid(False)
+        self.sem_table.setIconSize(QSize(8, 8))
+        self.sem_table.horizontalHeader().setHighlightSections(False)
         self.sem_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.sem_table.setMaximumHeight(120)
+        self.sem_table.setMaximumHeight(130)
         self.sem_table.itemChanged.connect(self._on_sem_changed)
 
         self.progress = ProgressPanel()
         self.error = error_label()
 
-        self.btn_fetch = QPushButton("Kurse aktualisieren")
+        self.btn_fetch = button("Kurse aktualisieren")
         self.btn_fetch.setToolTip("Kursliste neu aus ILIAS abrufen")
         self.btn_fetch.clicked.connect(self._fetch)
-        self.btn_discard = QPushButton("Verwerfen")
+        self.btn_discard = button("Verwerfen", "ghost")
         self.btn_discard.clicked.connect(self.load)
-        self.btn_save = QPushButton("Speichern")
-        self.btn_save.setDefault(True)
+        self.btn_save = button("Speichern", "primary")
         self.btn_save.clicked.connect(self.save)
 
+        self.actions.addWidget(self.btn_fetch)
+
         buttons = QHBoxLayout()
-        buttons.addWidget(self.btn_fetch)
-        buttons.addStretch(1)
+        buttons.addWidget(hint_label(
+            "Ein anderer Ordner ändert nur die Zuordnung. Vorhandene Dateien werden nicht verschoben."
+        ), 1)
         buttons.addWidget(self.btn_discard)
         buttons.addWidget(self.btn_save)
 
-        lay = QVBoxLayout(self)
-        lay.addWidget(self.hint)
-        lay.addWidget(self.table, 1)
-        lay.addWidget(hint_label(
-            "Ein anderer Ordner ändert nur die Zuordnung. Vorhandene Dateien werden nicht verschoben."
-        ))
-        lay.addWidget(sem_title)
-        lay.addWidget(self.sem_table)
-        lay.addWidget(self.progress)
-        lay.addWidget(self.error)
-        lay.addLayout(buttons)
+        courses_card = Card(margins=0, spacing=0)
+        courses_card.lay.addWidget(self.table)
+        sem_card = Card(margins=16, spacing=8)
+        sem_card.lay.addWidget(sem_title)
+        sem_card.lay.addWidget(hint_label("Leere Einträge werden beim nächsten Sync automatisch als nächste Nummer angelegt."))
+        sem_card.lay.addWidget(self.sem_table)
+
+        self.body.addWidget(self.hint)
+        self.body.addWidget(courses_card, 1)
+        self.body.addWidget(sem_card)
+        self.body.addWidget(self.progress)
+        self.body.addWidget(self.error)
+        self.body.addLayout(buttons)
 
         self.c.config_changed.connect(self._on_config_changed)
         self.c.sync_finished.connect(self._on_sync_finished)
@@ -166,28 +229,19 @@ class CoursesTab(QWidget):
             self.table.setItem(row, COL_NAME, name_item)
             self.table.setItem(row, COL_SEM, QTableWidgetItem(sem or "unbekannt"))
 
-            self.table.setCellWidget(row, COL_DIR, self._dir_combo(course, sem))
+            self.table.setCellWidget(row, COL_DIR, _cell(self._dir_combo(course, sem)))
 
-            for i, (field, _title) in enumerate(TYPE_COLUMNS):
-                box = QCheckBox()
-                box.setChecked(getattr(course, field))
-                box.toggled.connect(lambda on, c=course, f=field: self._set_type(c, f, on))
-                cell = QWidget()
-                cl = QHBoxLayout(cell)
-                cl.setContentsMargins(0, 0, 0, 0)
-                cl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                cl.addWidget(box)
-                self.table.setCellWidget(row, COL_FIRST_TYPE + i, cell)
+            self.table.setCellWidget(row, COL_TYPES, _cell(ContentsButton(course, self._set_type)))
 
             n = len(course.rules)
-            btn = QPushButton(f"Regeln ({n})" if n else "Regeln")
+            btn = button(f"Regeln ({n})" if n else "Regeln", None if n else "ghost")
             btn.clicked.connect(lambda _=False, c=course: self._edit_rules(c))
-            self.table.setCellWidget(row, COL_RULES, btn)
+            self.table.setCellWidget(row, COL_RULES, _cell(btn))
 
             if course.local_dir is None:
                 unassigned += 1
-                for col in (COL_NAME, COL_SEM):
-                    self.table.item(row, col).setBackground(QBrush(UNASSIGNED_BG))
+                name_item.setIcon(QIcon(dot(theme.tokens().warning, 8)))
+                name_item.setToolTip(f"Noch keinem Ordner zugeordnet\n{course.ilias_name}")
 
         if unassigned:
             kurs = "Ein Kurs ist" if unassigned == 1 else f"{unassigned} Kurse sind"
@@ -214,7 +268,7 @@ class CoursesTab(QWidget):
             self.sem_table.setItem(row, 0, key)
             val = QTableWidgetItem(folder)
             if not folder:
-                val.setBackground(QBrush(UNASSIGNED_BG))
+                key.setIcon(QIcon(dot(theme.tokens().warning, 8)))
                 val.setToolTip("Leer lassen: wird beim nächsten Sync automatisch mit der nächsten Nummer angelegt")
             self.sem_table.setItem(row, 1, val)
 

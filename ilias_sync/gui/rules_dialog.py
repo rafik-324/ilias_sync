@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -19,7 +18,7 @@ from PySide6.QtWidgets import (
 
 from ilias_sync.api import CourseRule
 from ilias_sync.gui.icons import app_icon
-from ilias_sync.gui.widgets import error_label, hint_label, show_error
+from ilias_sync.gui.widgets import button, error_label, hint_label, show_error
 
 TYP_ORDNER = "ILIAS Ordner"
 TYP_DATEI = "Dateiname"
@@ -46,13 +45,13 @@ class RulesDialog(QDialog):
         for rule in rules:
             self._add_row(rule)
 
-        btn_add = QPushButton("Hinzufügen")
+        btn_add = button("Hinzufügen")
         btn_add.clicked.connect(lambda: self._add_row(CourseRule(target="", match_folder="")))
-        btn_del = QPushButton("Entfernen")
+        btn_del = button("Entfernen", "ghost")
         btn_del.clicked.connect(self._remove_row)
-        btn_up = QPushButton("Nach oben")
+        btn_up = button("Nach oben", "ghost")
         btn_up.clicked.connect(lambda: self._move(-1))
-        btn_down = QPushButton("Nach unten")
+        btn_down = button("Nach unten", "ghost")
         btn_down.clicked.connect(lambda: self._move(1))
         side = QVBoxLayout()
         for b in (btn_add, btn_del, btn_up, btn_down):
