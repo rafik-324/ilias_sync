@@ -1,0 +1,5 @@
+# Einheitlich LF im Repo, damit macOS und Windows identische Dateien haben
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.icns binary
