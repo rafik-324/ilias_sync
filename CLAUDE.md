@@ -42,16 +42,25 @@ ilias_sync/
   downloader.py        Downloads, atomares Schreiben, Versionierung
   state.py             SQLite Index
   config.py            Laden, Validieren, Standardwerte
-  scheduler.py         Intervall Sync im Hintergrund
+  scheduler.py         Intervall Sync im Hintergrund (Logik ohne Qt)
+  api.py               Fassade für die GUI: einzige Schnittstelle zwischen GUI und Backend
   gui/
+    app.py             Einstieg: QApplication, Einzelinstanz, Tray, Wizard bei Erststart
     tray.py            Tray / Menüleisten Icon + Menü
     window.py          Hauptfenster
     setup_wizard.py    Erststart: Login, Basisordner, Kurszuordnung
+    worker.py          QThread Worker für Backend Aufrufe
+    scheduler_gui.py   QTimer, löst den Intervall Sync aus
+    fake_backend.py    Attrappe von api.py für Entwicklung und Tests
+    icons/
   platform_utils.py    Autostart, Dateinamen, Unicode, Link Dateien
 tests/
+  gui/
 ```
 
 Crawler, Mapper und Downloader dürfen keine GUI Abhängigkeiten haben, damit alles auch per CLI testbar ist.
+
+**Schichtung**: `gui/` importiert ausschließlich `api.py`, nie direkt `auth`, `crawler`, `mapper`, `downloader`, `state` oder `config`. Kein Backend Modul importiert PySide6. `api.py` ist synchron und Qt frei, langlaufende Methoden nehmen einen `progress` Callback und ein `cancel` Token (`threading.Event`) entgegen und werfen nur Fehler aus der Hierarchie `IliasSyncError` (`InvalidCredentialsError`, `LoginError`, `NetworkError`, `ConfigError`, `Cancelled`), deren Text direkt anzeigbar ist und keine Geheimnisse enthält. Der genaue Vertrag (Datentypen, Methoden) steht in `GUI_KONTEXT.md` Abschnitt 3 und ist für GUI und Backend verbindlich. Änderungen am Vertrag werden dort eingetragen.
 
 ## Authentifizierung (bereits analysiert, funktioniert)
 
@@ -98,7 +107,7 @@ Anforderungen:
 | Forum | pro Thread eine Markdown Datei (Autor, Datum, Text), Anhänge daneben |
 | Sonstiges (Wiki, Test, Umfrage ...) | vorerst nur als Link Datei zum ILIAS Objekt |
 
-Jeder Objekttyp ist in den Einstellungen pro Kurs einzeln abschaltbar (Standard: alles an).
+Jeder Objekttyp ist in den Einstellungen pro Kurs einzeln abschaltbar (Standard: alles an). Config Schalter pro Kurs: `download_files`, `download_videos`, `download_exercises`, `download_weblinks`, `download_forums`, `download_other`.
 
 ## Ordneraufbau ab Basispfad
 
@@ -202,6 +211,9 @@ root_folder_name = "01_Universität_Mannheim"  # wird unter base_dir angelegt
 sync_interval_minutes = 60
 max_parallel = 3
 semester_pattern = '\((HWS|FSS) (\d{4})\)'
+autostart = false
+sync_paused = false
+username = "<uni-id>"                         # nur Uni-ID, Passwort nie in der Config
 
 [semesters]
 "HWS 2026" = "01_SEMESTER"
@@ -210,8 +222,12 @@ semester_pattern = '\((HWS|FSS) (\d{4})\)'
 ref_id = 1234567
 ilias_name = "Marketing (HWS 2026)"
 local_dir = "01_marketing"
+download_files = true
 download_videos = true
+download_exercises = true
+download_weblinks = true
 download_forums = true
+download_other = true
 
   [[courses.rules]]
   match_folder = "Lecture Slides"     # Glob auf ILIAS Ordnernamen
@@ -259,6 +275,8 @@ SQLite im Datenverzeichnis. Tabelle `items`:
 Status: `ok`, `updated`, `user_modified`, `user_removed`, `error`. Tabelle `sync_runs` mit Start, Ende, Anzahl neu/aktualisiert/Fehler.
 
 ## GUI
+
+Die ausführliche Spezifikation für die GUI (Schnittstelle `api.py`, Threading, alle Screens, Fake Backend, Abnahmekriterien) steht in **`GUI_KONTEXT.md`**. Sie ist als eigenständiger Auftrag für einen separaten GUI Agenten geschrieben. Hier nur die Übersicht.
 
 ### Tray / Menüleisten Icon
 
@@ -315,6 +333,8 @@ Sync läuft immer in einem Worker Thread (`QThread`), die GUI blockiert nie.
 7. **Plattform**: Autostart, Dateinamen/Unicode Tests, Builds für macOS und Windows
 
 Nach jedem Meilenstein lauffähig und getestet, bevor der nächste beginnt.
+
+Ausnahme: Die GUI (Meilenstein 6) kann parallel von einem eigenen Agenten gegen `gui/fake_backend.py` entwickelt werden (siehe `GUI_KONTEXT.md`). `api.py` entsteht schrittweise mit den Backend Meilensteinen und ersetzt dann die Attrappe.
 
 ## Tests
 
