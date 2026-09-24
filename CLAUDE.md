@@ -80,8 +80,9 @@ ilias_sync/
     controller.py      Zentraler Zustand, einziger Zugriff auf das Backend, nur ein Sync gleichzeitig
     logic.py           Qt freie Hilfslogik (Zeiten, Texte, Vorschau Baum, Validierung), ohne QApplication testbar
     tray.py            Tray / Menüleisten Icon + Menü
-    window.py          Hauptfenster
-    tab_overview.py    Tabs des Hauptfensters: Übersicht,
+    window.py          Hauptfenster: Seitenleiste mit Navigation, rechts die jeweilige Seite
+    theme.py           Design Tokens für hell und dunkel, zentrales Stylesheet (Qt Stil Fusion)
+    tab_overview.py    Seiten des Hauptfensters: Übersicht,
     tab_courses.py       Kurse,
     tab_preview.py       Vorschau,
     tab_settings.py      Einstellungen,
@@ -350,6 +351,8 @@ Die ausführliche Spezifikation für die GUI (Schnittstelle `api.py`, Threading,
 * macOS: App ohne Dock Icon (`LSUIElement`), nur Menüleiste
 
 ### Hauptfenster (klein, übersichtlich)
+
+Seitenleiste links mit diesen Seiten, Design folgt automatisch dem hellen oder dunklen Modus des Systems:
 
 * **Übersicht**: Status, letzter Sync, Liste der zuletzt geladenen Dateien mit Kurs und Zielordner
 * **Kurse**: Tabelle ILIAS Kurs → lokaler Ordner, Dropdown zum Ändern, Checkboxen pro Kurs für Videos/Foren/Übungen, Regeln bearbeiten
