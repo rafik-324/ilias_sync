@@ -57,9 +57,9 @@ Backend und GUI werden parallel von zwei Claude Sitzungen entwickelt. Jede hat i
 
 ```
 ilias_sync/
-  __main__.py          Einstieg: GUI starten oder CLI Modus (bisher --login, --logout, --crawl
-                       mit --course/--output/-v, --test-sync ZIELORDNER [--videos];
-                       --sync und --dry-run folgen mit Meilenstein 3)
+  __main__.py          Einstieg: GUI starten oder CLI Modus (--login, --logout, --crawl
+                       mit --course/--output/-v, --test-sync ZIELORDNER [--videos],
+                       --dry-run und --sync [--output])
   auth.py              Login, Session, Cookies, Keyring (Basis: ilias_login.py)
   crawler.py           ILIAS Kurse und Objekte rekursiv erfassen
   objects/             Handler pro ILIAS Objekttyp
@@ -70,8 +70,9 @@ ilias_sync/
     weblink.py
     forum.py
   mapper.py            ILIAS Pfad -> lokaler Zielpfad (Kategorien, Config Regeln)
-  downloader.py        Downloads, atomares Schreiben, Versionierung
-  state.py             SQLite Index
+  downloader.py        Downloads, atomares Schreiben, Hash, Namen für Versionen
+  sync.py              Sync planen (Mapper + Index + Dateisystem) und ausführen
+  state.py             SQLite Index, eine Datenbank pro Uni Ordner
   config.py            Laden, Validieren, Standardwerte
   scheduler.py         Intervall Sync im Hintergrund (Logik ohne Qt)
   api.py               Fassade für die GUI: einzige Schnittstelle zwischen GUI und Backend
@@ -393,12 +394,12 @@ Sync läuft immer in einem Worker Thread (`QThread`), die GUI blockiert nie.
 
 Nach jedem Meilenstein lauffähig und getestet, bevor der nächste beginnt.
 
-**Stand (2026-09-24)**: Meilenstein 1 und 2 fertig, Crawler mit 3 parallelen Abrufen und automatischem Relogin. Meilenstein 4 (Mapper) vorgezogen und weitgehend fertig, weil der Downloader die Zielpfade braucht. Von Meilenstein 3 gibt es den einfachen Downloader (`.part`, atomar, nie überschreiben) und `--test-sync`, der in `01_Universität_Mannheim\_ILIAS_Sync_Test` einsortiert. Es fehlen noch Status Index (`state.py`), Versionierung (`_alt_`, `_ilias_`), `--dry-run` und `--sync`. **Der echte `01_SEMESTER` wird bis zur Fertigstellung nur gelesen** (Vorgabe des Nutzers). GUI (Meilenstein 6) läuft parallel auf Branch `gui` gegen das Fake Backend.
+**Stand (2026-09-25)**: Meilenstein 1 und 2 fertig, Crawler mit 3 parallelen Abrufen und automatischem Relogin. Meilenstein 4 (Mapper) vorgezogen und weitgehend fertig. Meilenstein 3 im CLI fertig: Status Index (`state.py`), Versionierung (`_alt_`, `_ilias_`), `--dry-run` und `--sync` (`sync.py`). Es fehlt noch die echte `api.Api` für die GUI. `--test-sync` bleibt für Tests. **Der echte `01_SEMESTER` wird nie beschrieben** (Vorgabe des Nutzers). GUI (Meilenstein 6) läuft parallel auf Branch `gui` gegen das Fake Backend.
 
-Offene Entscheidungen des Nutzers (nach dem Test Sync):
-* PI1 Vorlesung: eigene Ordner (`01_Vorlesung_grundlagen_programmiereung`, `02_Vorlesung_grundlagen_Java`) heißen anders als in ILIAS (`01 Vom Problem zum Programm` ...), der Mapper legt die ILIAS Ordner daneben an. Umbenennen oder Config Regeln?
-* Matlab Lizenzkurs (MSDNAA, landet in `_Ohne_Semester`): behalten oder ignorieren?
-* Videos (85 Stück, etwa 4 GB): laden oder nicht?
+Entscheidung des Nutzers (2026-09-25): **Der erste echte Sync läuft in einen komplett neuen, leeren Basisordner** und lädt alles einmal herunter (auch Videos, auch den Lizenzkurs unter `_Ohne_Semester`). Die bisherigen eigenen Ordner bleiben unberührt, das Tool legt die Struktur selbst an. Umsetzung:
+* Erster Sync (Index für diesen Uni Ordner leer) nur, wenn der Uni Ordner fehlt oder leer ist, sonst Abbruch mit Hinweis (`sync.check_first_sync`, `BaseDirCheck.is_empty`)
+* Kurse ohne Zuordnung bekommen beim Sync `NN_kursname` Ordner (`Mapper.suggest_courses`), gespeichert in der Config. Kurse derselben Veranstaltung ([V], [Ü], [T], Tut Gruppe) teilen sich einen Ordner
+* Der Index liegt pro Uni Ordner im Datenverzeichnis, lokale Pfade relativ zum Uni Ordner
 
 Ausnahme: Die GUI (Meilenstein 6) kann parallel von einem eigenen Agenten gegen `gui/fake_backend.py` entwickelt werden (siehe `GUI_KONTEXT.md`). `api.py` entsteht schrittweise mit den Backend Meilensteinen und ersetzt dann die Attrappe.
 

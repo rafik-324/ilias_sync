@@ -17,8 +17,8 @@ from pathlib import Path
 import requests
 from bs4 import BeautifulSoup
 
-from . import auth, config, crawler, downloader, mapper
-from .api import Config, ConfigError
+from . import auth, config, crawler, downloader, mapper, state, sync
+from .api import ActionKind, Config, ConfigError
 
 log = logging.getLogger(config.APP_NAME)
 
@@ -231,11 +231,7 @@ def format_crawl(result: crawler.CrawlResult) -> list[str]:
 
 # ---------------- Test Sync: echte Downloads in einen Testordner ----------------
 
-VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".mkv", ".webm", ".avi", ".wmv"}
-
-
-def is_video(item: mapper.MappedItem) -> bool:
-    return Path(item.obj.name).suffix.lower() in VIDEO_SUFFIXES
+is_video = sync.is_video
 
 
 def check_test_target(target: Path, real_root: Path) -> str | None:
@@ -364,6 +360,104 @@ def cmd_test_sync(target: Path, with_videos: bool) -> int:
     return 0 if not errors else 2
 
 
+
+# ---------------- Echter Sync und Dry Run ----------------
+
+KIND_LABELS = {
+    ActionKind.NEW: "NEU",
+    ActionKind.UPDATE: "AKTUALISIERT",
+    ActionKind.CONFLICT: "KONFLIKT",
+    ActionKind.SKIP_REMOVED: "ENTFERNT",
+}
+
+
+def format_plan(jobs: list[sync.Job], root: Path, suggestions: list, unassigned: list) -> list[str]:
+    lines = []
+    if suggestions:
+        lines += ["Neue Kursordner (werden in der Config gespeichert):"]
+        for c in suggestions:
+            lines += [f"  {c.ilias_name}", f"      -> {c.local_dir}"]
+        lines.append("")
+    if unassigned:
+        lines += ["Kurse ohne Zuordnung (landen in _Neue_Kurse):"]
+        lines += [f"  {cm.course.name}" for cm in unassigned]
+        lines.append("")
+    for kind, label in KIND_LABELS.items():
+        selected = [j for j in jobs if j.kind == kind]
+        if not selected:
+            continue
+        size = sum(j.item.obj.size or 0 for j in selected)
+        lines.append(f"{label}: {len(selected)} Dateien" + (f", etwa {format_size(size)}" if size else ""))
+        lines += [f"  {j.target.relative_to(root).as_posix()}" for j in sorted(selected, key=lambda j: j.target)]
+        lines.append("")
+    if not jobs:
+        lines.append("Nichts zu tun, alles aktuell.")
+    return lines
+
+
+def cmd_sync(dry_run: bool, output: Path | None) -> int:
+    cfg = load_config_or_report()
+    if cfg is None:
+        return 1
+    if cfg.base_dir is None:
+        print("FEHLER: In der Config fehlt general.base_dir (Basispfad).")
+        return 1
+    root = cfg.base_dir / cfg.root_folder_name
+    with state.State(state.db_file(config.data_dir(), root)) as st:
+        if problem := sync.check_first_sync(st, root):
+            print("FEHLER:", problem)
+            return 1
+        s = open_session(cfg)
+        if s is None:
+            return 1
+        print(("Dry Run, es wird nichts geschrieben: " if dry_run else "Sync nach: ") + str(root))
+        started = time.monotonic()
+        result = run_crawl(cfg, s, [])
+        if result is None:
+            return 1
+
+        suggestions = mapper.Mapper(cfg, root).suggest_courses(result)
+        cfg.courses += suggestions
+        if suggestions and not dry_run:
+            config.save_config(cfg)
+        mapping = mapper.Mapper(cfg, root).map_crawl(result)
+        jobs = sync.plan(mapping, st, root, cfg)
+        lines = format_plan(jobs, root, suggestions, sync.unassigned_courses(mapping))
+        if result.failed:
+            lines.append(f"Nicht gelesene ILIAS Seiten: {', '.join(result.failed)}")
+        print("\n".join(lines))
+        if output:
+            output.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            print("Ausgabe gespeichert in:", output)
+        if dry_run:
+            return 0
+
+        throttle = crawler.Throttle(crawler.DEFAULT_DELAY)
+        relogin_lock = threading.Lock()
+
+        def relogin() -> None:
+            with relogin_lock:
+                auth.relogin(s, lambda: console_credentials(cfg))
+
+        def progress(p) -> None:
+            progress_line(f"Dateien: {p.current}/{p.total}")
+
+        try:
+            sync_result, _ = sync.execute(jobs, mapping, s, st, root, cfg.max_parallel, progress,
+                                          relogin=relogin, throttle=throttle)
+        except KeyboardInterrupt:
+            print("\nAbgebrochen. Geladene Dateien bleiben und stehen im Index, .part Dateien werden entfernt.")
+            return 1
+        if sys.stderr.isatty():
+            print(file=sys.stderr)
+        run = sync_result.run
+        print(f"Sync fertig in {time.monotonic() - started:.0f} s: {run.new} neu, {run.updated} aktualisiert, "
+              f"{run.errors} Fehler")
+        for e in sync_result.errors:
+            print("  FEHLER", e)
+        return 0 if not sync_result.errors else 2
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ilias_sync", description="ILIAS Sync (Uni Mannheim)")
     group = parser.add_mutually_exclusive_group(required=True)
@@ -373,6 +467,9 @@ def main(argv: list[str] | None = None) -> int:
                        help="Testlauf: alle Kurse, Ordner und Dateien auflisten, nichts herunterladen")
     group.add_argument("--test-sync", type=Path, metavar="ZIELORDNER",
                        help="Test: Dateien einsortiert in ZIELORDNER laden, echte Uni Ordner nur lesen")
+    group.add_argument("--dry-run", action="store_true", help="zeigen, was ein Sync tun würde, nichts schreiben")
+    group.add_argument("--sync", action="store_true",
+                       help="echter Sync in den Uni Ordner aus der Config (erster Sync nur in leeren Ordner)")
     parser.add_argument("--videos", action="store_true", help="beim Test Sync auch Videos laden")
     parser.add_argument("--course", type=int, action="append", default=[], metavar="REF_ID",
                         help="nur diesen Kurs crawlen (mehrfach möglich)")
@@ -389,6 +486,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_crawl(args.course, args.output)
     if args.test_sync:
         return cmd_test_sync(args.test_sync, args.videos)
+    if args.dry_run or args.sync:
+        return cmd_sync(args.dry_run, args.output)
     return cmd_logout()
 
 

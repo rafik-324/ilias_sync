@@ -190,6 +190,18 @@ def best_course_dir(ilias_name: str, local_dirs: list[str], semester_pattern: st
     return max(scored)[1], 1.0
 
 
+def course_dir_name(ilias_name: str, semester_pattern: str) -> str:
+    """Ordnername ohne Nummer für einen neuen Kurs: "Praktische Informatik I [V] (HWS 2026)"
+    -> "praktische_informatik_i". Gleiche Kürzungen wie beim Fuzzy Match."""
+    name = re.sub(semester_pattern, " ", ilias_name)
+    name = re.sub(r"\[[^\]]*\]", " ", name)
+    name = re.sub(r"(,\s*)?\b(gro(ß|ss)e|kleine)\s+(Übung|Uebung)\b", " ", name, flags=re.IGNORECASE)
+    name = re.sub(r"\s-\s*Tut\b.*$", " ", name, flags=re.IGNORECASE)
+    name = re.sub(r"[,;:!?()\[\]{}'\"]", " ", nfc(name)).lower()
+    name = re.sub(r"\s+", "_", sanitize_name(name).strip()).strip("._-")
+    return name or "kurs"
+
+
 # ---------------- Semester ----------------
 
 def semester_sort_key(semester: str) -> tuple[int, int]:
@@ -371,12 +383,45 @@ class Mapper:
         return CourseMapping(course, semester, semester_dir, f"{NEW_COURSES_DIR}/{sanitize_name(course.name)}",
                              False, "neu")
 
+    def semester_dirs(self, result: CrawlResult) -> dict[str, str]:
+        found = {s for c in result.courses if (s := course_semester(c))}
+        existing = [d for d in self.tree.subdirs(()) if SEMESTER_DIR_RE.match(d)]
+        return assign_semesters(sorted(found), dict(self.cfg.semesters), existing)
+
+    def suggest_courses(self, result: CrawlResult) -> list[CourseConfig]:
+        """Neue Kursordner NN_kursname für Kurse ohne Config Eintrag und ohne passenden
+        vorhandenen Ordner. Kurse derselben Veranstaltung ([V], [Ü], [T], Tut Gruppe)
+        bekommen denselben Ordner. Nummern fortlaufend nach vorhandenen Ordnern, in der
+        Reihenfolge des Dashboards. Schreibt nichts, der Aufrufer speichert in der Config."""
+        semester_dirs = self.semester_dirs(result)
+        courses = [c for c in result.courses if c.ref_id not in result.nested_in]
+        mappings = [self.map_course(c, semester_dirs) for c in courses]
+        # Belegte Namen je Semesterordner: vorhandene Ordner und Kurse aus der Config
+        used: dict[str, list[str]] = {}
+        for cm in mappings:
+            names = used.setdefault(cm.semester_dir, list(self.tree.subdirs((cm.semester_dir,), include_ignored=True)))
+            if cm.source == "config":
+                names.append(cm.course_dir)
+
+        planned: dict[tuple[str, tuple[str, ...]], str] = {}   # (Semesterordner, Kurswörter) -> Ordner
+        suggestions: list[CourseConfig] = []
+        for course, cm in zip(courses, mappings):
+            if cm.source != "neu":
+                continue
+            key = (cm.semester_dir, tuple(ilias_course_words(course.name, self.cfg.semester_pattern)))
+            if key not in planned:
+                names = used[cm.semester_dir]
+                numbers = [n for n in (number_prefix(d) for d in names) if n is not None]
+                name = f"{max(numbers, default=0) + 1:02d}_{course_dir_name(course.name, self.cfg.semester_pattern)}"
+                names.append(name)
+                planned[key] = name
+            suggestions.append(CourseConfig(ref_id=course.ref_id, ilias_name=course.name, local_dir=planned[key]))
+        return suggestions
+
     # ---------- Objekte ----------
 
     def map_crawl(self, result: CrawlResult) -> MappingResult:
-        found = {s for c in result.courses if (s := course_semester(c))}
-        existing = [d for d in self.tree.subdirs(()) if SEMESTER_DIR_RE.match(d)]
-        semester_dirs = assign_semesters(sorted(found), dict(self.cfg.semesters), existing)
+        semester_dirs = self.semester_dirs(result)
 
         items: list[MappedItem] = []
         mappings: list[CourseMapping] = []

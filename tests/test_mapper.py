@@ -373,3 +373,42 @@ def test_mapper_does_not_write(root):
     c = crs(1, "Statistik I (HWS 2026)")
     map_one(root, c, [("fold", "Neu", 2), ("file", "Neu / a.pdf", 3)])
     assert sorted(p.relative_to(root) for p in root.rglob("*")) == before
+
+
+# ---------------- Vorschläge für neue Kursordner (erster Sync in leeren Ordner) ----------------
+
+def test_course_dir_name():
+    assert mapper.course_dir_name("Praktische Informatik I [V] [1. PG] (HWS 2026)", PATTERN) == "praktische_informatik_i"
+    assert mapper.course_dir_name("Programmierpraktikum I, Große Übung [Ü] (HWS 2026)", PATTERN) \
+        == "programmierpraktikum_i"
+    assert mapper.course_dir_name("IS 201 Wirtschaftsinformatik I: Einführung und Grundlagen [V] (HWS 2026)",
+                                  PATTERN) == "is_201_wirtschaftsinformatik_i_einführung_und_grundlagen"
+    assert mapper.course_dir_name("[V] (HWS 2026)", PATTERN) == "kurs"
+
+
+def test_suggest_courses_in_empty_root_groups_lectures(tmp_path):
+    courses = [
+        crs(1, "Marketing [V] (HWS 2026)"),
+        crs(2, "Praktische Informatik I [V] [1. PG] (HWS 2026)"),
+        crs(3, "Praktische Informatik I [Ü] [1. PG] (HWS 2026)"),
+        crs(4, "Praktische Informatik I - Tut [1. PG]", kind="grp"),
+        crs(5, "License Information (Student University of Mannheim)", heading="Sonstige"),
+        crs(6, "Programmierpraktikum I [V] (HWS 2026)"),
+    ]
+    m = mapper.Mapper(Config(base_dir=None), tmp_path / "leer")
+    got = {c.ref_id: c.local_dir for c in m.suggest_courses(CrawlResult(courses=courses, nested_in={4: "PI1"}))}
+    assert got == {
+        1: "01_marketing",
+        2: "02_praktische_informatik_i",
+        3: "02_praktische_informatik_i",
+        6: "03_programmierpraktikum_i",
+    }
+
+
+def test_suggest_courses_skips_configured_and_existing(root):
+    courses = [crs(1, "Marketing [V] (HWS 2026)"), crs(2, "Neues Fach [V] (HWS 2026)"),
+               crs(3, "Anderes Fach [V] (HWS 2026)")]
+    m = make_mapper(root, semesters={"HWS 2026": "01_SEMESTER"},
+                    courses=[CourseConfig(3, "Anderes Fach [V] (HWS 2026)", "07_anderes")])
+    got = [(c.ref_id, c.local_dir) for c in m.suggest_courses(CrawlResult(courses=courses))]
+    assert got == [(2, "08_neues_fach")]
