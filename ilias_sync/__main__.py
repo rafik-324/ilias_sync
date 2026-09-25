@@ -279,7 +279,7 @@ def format_preview(mapping: mapper.MappingResult, skipped_videos: set[int]) -> l
     others = Counter(crawler.TYPE_NAMES.get(it.obj.type) or it.obj.type_label or it.obj.type
                      for it in mapping.items if it.obj.type != "file")
     if others:
-        lines += ["", "Noch nicht behandelt (kommt mit Meilenstein 5): "
+        lines += ["", "Werden nicht geladen (nur Dateien): "
                   + ", ".join(f"{n} {label}" for label, n in others.most_common())]
     return lines
 

@@ -61,7 +61,8 @@ def ilias_path(item: MappedItem) -> str:
 
 
 def wanted(item: MappedItem, cfg: Config) -> bool:
-    """Nur Dateien (weitere Objekttypen folgen mit Meilenstein 5), Schalter pro Kurs beachten."""
+    """Nur Dateien, andere ILIAS Objekttypen werden nie geladen (Entscheidung des Nutzers).
+    Schalter pro Kurs beachten."""
     if item.obj.type != "file" or not item.obj.url:
         return False
     course = next((c for c in cfg.courses if c.ref_id == item.course.ref_id), None)

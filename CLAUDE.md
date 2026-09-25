@@ -138,7 +138,9 @@ Anforderungen:
 * Parallelität standardmäßig 3, maximal 5, kleine Pause zwischen Seitenabrufen
 * Unbekannte Objekttypen loggen und überspringen, nicht abbrechen
 
-## Was heruntergeladen wird ("alles")
+## Was heruntergeladen wird
+
+**Entscheidung des Nutzers (2026-09-25): nur Dateien**, dazu gehören auch Videos, die in ILIAS als Datei liegen (`.mp4` usw.). Übungen, Weblinks, Foren, MobileQuiz, TraQ, Lernmodule und alle übrigen Objekttypen werden **nicht** geladen, auch keine Link Dateien. Die Tabelle unten war der ursprüngliche Plan und gilt nur noch, falls der Nutzer das später wieder möchte.
 
 | ILIAS Objekt | Lokal |
 |---|---|
@@ -389,7 +391,7 @@ Sync läuft immer in einem Worker Thread (`QThread`), die GUI blockiert nie.
 2. **Crawler Grundlage**: Dashboard Kurse auslesen, Fixtures speichern, Kursliste per CLI ausgeben
 3. **Dateien + Ordner**: rekursiv crawlen, Download mit Index, CLI `--dry-run` und `--sync`
 4. **Mapper**: Kategorieerkennung, Nutzung bestehender Ordner, Config Regeln, Ignore Liste. Tests mit der Struktur oben
-5. **Weitere Objekttypen**: Übungen, Weblinks, Videos (Opencast recherchieren), Foren
+5. ~~**Weitere Objekttypen**~~: entfällt, nur Dateien (Entscheidung des Nutzers 2026-09-25)
 6. **GUI**: Tray Icon, Hauptfenster, Setup Wizard, Benachrichtigungen, Hintergrund Intervall
 7. **Plattform**: Autostart, Dateinamen/Unicode Tests, Builds für macOS und Windows
 
