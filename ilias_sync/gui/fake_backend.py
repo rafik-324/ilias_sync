@@ -320,12 +320,13 @@ class FakeApi:
         root = path / root_name
         has_root = root.is_dir()
         semesters = sorted(p.name for p in root.iterdir() if p.is_dir()) if has_root else []
+        is_empty = not has_root or not any(root.iterdir())
         message = None
         if not exists:
             message = "Der Ordner existiert nicht. Er kann angelegt werden."
         elif not writable:
             message = "In diesen Ordner darf nicht geschrieben werden."
-        return BaseDirCheck(exists, writable, has_root, semesters, message)
+        return BaseDirCheck(exists, writable, has_root, semesters, message, is_empty)
 
     def create_base_structure(self, path: Path) -> None:
         path = Path(path).expanduser()
@@ -420,8 +421,20 @@ class FakeApi:
     def dry_run(self, progress: ProgressCallback, cancel: threading.Event) -> list[PlannedAction]:
         return self._plan(progress, cancel)
 
+    def _check_first_sync(self) -> None:
+        """Wie das echte Backend: der erste Sync läuft nur in einen leeren oder neuen Uni Ordner."""
+        if self._runs or self._config is None:
+            return
+        root = self._root()
+        if root.is_dir() and any(root.iterdir()):
+            raise ConfigError(
+                f"Der Ordner {root} enthält schon Dateien. Der erste Sync läuft nur in einen leeren "
+                "oder neuen Uni Ordner. Bitte in den Einstellungen einen anderen Basisordner wählen."
+            )
+
     def sync(self, progress: ProgressCallback, cancel: threading.Event) -> SyncResult:
         started = datetime.now()
+        self._check_first_sync()
         progress(Progress("Anmelden", 0, None, None))
         self._sleep(cancel, 6)
         if not self._logged_in:

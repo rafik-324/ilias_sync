@@ -167,7 +167,7 @@ class MainWindow(QMainWindow):
             IconState.PAUSED: "Pausiert",
         }[state]
         self.status_label.setText(text)
-        run = self.c.api.last_run() if self.c.config is not None else None
+        run = self.c.last_run
         when = logic.relative_time(run.finished_at or run.started_at) if run else "noch nie"
         self.status_sub.setText(f"Letzter Sync {when}")
 

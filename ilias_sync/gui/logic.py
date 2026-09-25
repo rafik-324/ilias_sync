@@ -75,6 +75,30 @@ def format_size(size: int | None) -> str:
     return f"{size} B"
 
 
+def semester_of(name: str, pattern: str) -> str | None:
+    """Semester aus dem Kursnamen, z. B. "Marketing (HWS 2026)" -> "HWS 2026"."""
+    try:
+        m = re.search(pattern, name)
+    except re.error:
+        return None
+    if not m or len(m.groups()) < 2:
+        return None
+    return f"{m.group(1)} {m.group(2)}"
+
+
+def semester_rows(cfg: Config) -> list[tuple[str, str]]:
+    """Semester Zuordnung für die Anzeige: gespeicherte plus Semester aus den Kursnamen ohne Ordner.
+
+    Zugeordnete zuerst (nach Ordner), danach die noch leeren.
+    """
+    rows = dict(cfg.semesters)
+    for course in cfg.courses:
+        sem = semester_of(course.ilias_name, cfg.semester_pattern)
+        if sem and sem not in rows:
+            rows[sem] = ""
+    return sorted(rows.items(), key=lambda kv: (kv[1] == "", kv[1], kv[0]))
+
+
 def course_display_name(ilias_name: str, pattern: str | None = None) -> str:
     """Kursname ohne Semesterzusatz, z. B. "Marketing (HWS 2026)" -> "Marketing"."""
     pattern = pattern or r"\((HWS|FSS) (\d{4})\)"
@@ -295,35 +319,6 @@ def relative_to_root(path: Path, root: Path | None) -> str:
         except ValueError:
             pass
     return str(path.parent)
-
-
-def base_dir_candidates(home: Path | None = None) -> list[Path]:
-    """Übliche Orte, unter denen ein vorhandener Uni Ordner liegen kann."""
-    home = home or Path.home()
-    return [
-        home / "OneDrive",
-        home / "OneDrive" / "Dokumente",
-        home / "OneDrive" / "Documents",
-        home / "Documents",
-        home / "Dokumente",
-        home / "Library" / "Mobile Documents" / "com~apple~CloudDocs",
-        home,
-    ]
-
-
-def find_existing_base(root_folder_name: str, home: Path | None = None) -> Path | None:
-    """Basisordner, unter dem der Uni Ordner schon existiert, sonst None."""
-    target = _nfc(root_folder_name)
-    for candidate in base_dir_candidates(home):
-        try:
-            if not candidate.is_dir():
-                continue
-            for child in candidate.iterdir():
-                if child.is_dir() and _nfc(child.name) == target:
-                    return candidate
-        except OSError:
-            continue
-    return None
 
 
 def contents_summary(flags: list[tuple[str, bool]]) -> str:

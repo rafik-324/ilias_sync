@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from copy import deepcopy
 
 from PySide6.QtCore import QSize, Qt
@@ -49,16 +48,6 @@ TYPE_COLUMNS: list[tuple[str, str]] = [
 COL_NAME, COL_SEM, COL_DIR, COL_TYPES, COL_RULES = range(5)
 
 STANDARD_KATEGORIEN = ["01_Vorlesung", "02_Übung", "03_Tutorium", "03_Übungsblätter", "04_Abgaben"]
-
-
-def semester_of(name: str, pattern: str) -> str | None:
-    try:
-        m = re.search(pattern, name)
-    except re.error:
-        return None
-    if not m or len(m.groups()) < 2:
-        return None
-    return f"{m.group(1)} {m.group(2)}"
 
 
 class ContentsPopup(QFrame):
@@ -144,20 +133,9 @@ class CoursesTab(Page):
             h.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
             self.table.setColumnWidth(col, width)
 
-        # Semester Zuordnung
-        sem_title = role_label("Semester Ordner", "section")
-        self.sem_table = QTableWidget(0, 2)
-        self.sem_table.setHorizontalHeaderLabels(["Semester (aus Kursname)", "Ordner"])
-        self.sem_table.verticalHeader().hide()
-        self.sem_table.verticalHeader().setDefaultSectionSize(34)
-        self.sem_table.setShowGrid(False)
-        self.sem_table.setIconSize(QSize(8, 8))
-        self.sem_table.horizontalHeader().setHighlightSections(False)
-        self.sem_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.sem_table.setMaximumHeight(130)
-        self.sem_table.itemChanged.connect(self._on_sem_changed)
-
         self.progress = ProgressPanel()
+        self.progress.cancel_clicked.connect(self._cancel_fetch)
+        self._fetch_task = None
         self.error = error_label()
 
         self.btn_fetch = button("Kurse aktualisieren")
@@ -172,21 +150,17 @@ class CoursesTab(Page):
 
         buttons = QHBoxLayout()
         buttons.addWidget(hint_label(
-            "Ein anderer Ordner ändert nur die Zuordnung. Vorhandene Dateien werden nicht verschoben."
+            "Ein anderer Ordner ändert nur die Zuordnung. Vorhandene Dateien werden nicht verschoben. "
+            "Die Semester Ordner stehen in den Einstellungen."
         ), 1)
         buttons.addWidget(self.btn_discard)
         buttons.addWidget(self.btn_save)
 
         courses_card = Card(margins=0, spacing=0)
         courses_card.lay.addWidget(self.table)
-        sem_card = Card(margins=16, spacing=8)
-        sem_card.lay.addWidget(sem_title)
-        sem_card.lay.addWidget(hint_label("Leere Einträge werden beim nächsten Sync automatisch als nächste Nummer angelegt."))
-        sem_card.lay.addWidget(self.sem_table)
 
         self.body.addWidget(self.hint)
         self.body.addWidget(courses_card, 1)
-        self.body.addWidget(sem_card)
         self.body.addWidget(self.progress)
         self.body.addWidget(self.error)
         self.body.addLayout(buttons)
@@ -222,7 +196,7 @@ class CoursesTab(Page):
         self.table.setRowCount(len(courses))
         unassigned = 0
         for row, course in enumerate(courses):
-            sem = semester_of(course.ilias_name, self._pattern())
+            sem = logic.semester_of(course.ilias_name, self._pattern())
             name_item = QTableWidgetItem(logic.course_display_name(course.ilias_name, self._pattern()))
             name_item.setToolTip(f"{course.ilias_name}\nref_id {course.ref_id}")
             name_item.setData(Qt.ItemDataRole.UserRole, course.ref_id)
@@ -250,27 +224,7 @@ class CoursesTab(Page):
                 "<i>Semesterordner/_Neue_Kurse</i> abgelegt."
             )
         self.hint.setVisible(bool(unassigned))
-        self._fill_semesters()
         self._filling = False
-
-    def _fill_semesters(self) -> None:
-        semesters = dict(self.cfg.semesters) if self.cfg else {}
-        # Semester aus Kursnamen ergänzen, die noch keinen Ordner haben
-        if self.cfg:
-            for course in self.cfg.courses:
-                sem = semester_of(course.ilias_name, self._pattern())
-                if sem and sem not in semesters:
-                    semesters[sem] = ""
-        self.sem_table.setRowCount(len(semesters))
-        for row, (sem, folder) in enumerate(sorted(semesters.items(), key=lambda kv: (kv[1] == "", kv[1]))):
-            key = QTableWidgetItem(sem)
-            key.setFlags(key.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.sem_table.setItem(row, 0, key)
-            val = QTableWidgetItem(folder)
-            if not folder:
-                key.setIcon(QIcon(dot(theme.tokens().warning, 8)))
-                val.setToolTip("Leer lassen: wird beim nächsten Sync automatisch mit der nächsten Nummer angelegt")
-            self.sem_table.setItem(row, 1, val)
 
     def _semester_dir(self, sem: str | None) -> str | None:
         if not sem or self.cfg is None:
@@ -339,7 +293,7 @@ class CoursesTab(Page):
     def _edit_rules(self, course: CourseConfig) -> None:
         targets = list(STANDARD_KATEGORIEN)
         root = self.c.api.root_dir()
-        sem_dir = self._semester_dir(semester_of(course.ilias_name, self._pattern()))
+        sem_dir = self._semester_dir(logic.semester_of(course.ilias_name, self._pattern()))
         if root and sem_dir and course.local_dir:
             folder = root / sem_dir / course.local_dir
             if folder.is_dir():
@@ -351,18 +305,6 @@ class CoursesTab(Page):
             self._set_dirty(True)
             self._fill()
 
-    def _on_sem_changed(self, item: QTableWidgetItem) -> None:
-        if self._filling or self.cfg is None or item.column() != 1:
-            return
-        sem = self.sem_table.item(item.row(), 0).text()
-        value = item.text().strip()
-        if value:
-            self.cfg.semesters[sem] = value
-        else:
-            self.cfg.semesters.pop(sem, None)
-        self._set_dirty(True)
-        self._fill()
-
     def _set_dirty(self, dirty: bool) -> None:
         self.dirty = dirty
         self.btn_save.setEnabled(dirty)
@@ -371,10 +313,13 @@ class CoursesTab(Page):
     # ---------------- Speichern ----------------
 
     def save(self) -> bool:
-        if self.cfg is None:
+        if self.cfg is None or self.c.config is None:
             return False
+        # Nur die Kurse übernehmen, alles andere (z. B. Semester Ordner) gehört den Einstellungen
+        cfg = deepcopy(self.c.config)
+        cfg.courses = deepcopy(self.cfg.courses)
         try:
-            self.c.save_config(self.cfg)
+            self.c.save_config(cfg)
         except ConfigError as e:
             show_error(self.error, str(e))
             return False
@@ -416,10 +361,13 @@ class CoursesTab(Page):
     def _fetch(self) -> None:
         self.btn_fetch.setEnabled(False)
         self.progress.start("Kurse werden abgerufen ...")
-        task = run_task(self.c.api.fetch_courses, with_progress=True,
-                        on_progress=self.progress.update_progress,
-                        on_done=self._fetched, on_error=self._fetch_failed)
-        self.progress.cancel_clicked.connect(task.cancel)
+        self._fetch_task = run_task(self.c.api.fetch_courses, with_progress=True,
+                                    on_progress=self.progress.update_progress,
+                                    on_done=self._fetched, on_error=self._fetch_failed)
+
+    def _cancel_fetch(self) -> None:
+        if self._fetch_task is not None:
+            self._fetch_task.cancel()
 
     def _fetched(self, courses: list[IliasCourse]) -> None:
         self.progress.stop()

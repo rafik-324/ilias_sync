@@ -99,3 +99,23 @@ def test_local_course_dirs(fake):
 
 def test_workdir_ist_temp(fake):
     assert isinstance(fake.workdir, Path)
+
+
+def test_erster_sync_nur_in_leeren_uni_ordner(fake_first_run, tmp_path):
+    import threading
+
+    import pytest
+
+    from ilias_sync.api import ConfigError
+
+    base = fake_first_run.workdir / "Uni"
+    (base / "01_Universität_Mannheim" / "eigene_Notizen").mkdir(parents=True)
+    check = fake_first_run.check_base_dir(base)
+    assert check.has_root_folder and not check.is_empty
+    fake_first_run.create_base_structure(base)
+    with pytest.raises(ConfigError):
+        fake_first_run.sync(lambda p: None, threading.Event())
+
+
+def test_check_base_dir_leer(fake_first_run, tmp_path):
+    assert fake_first_run.check_base_dir(tmp_path / "gibt_es_nicht").is_empty

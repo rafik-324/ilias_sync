@@ -361,13 +361,13 @@ Seitenleiste links mit diesen Seiten, Design folgt automatisch dem hellen oder d
 * **Übersicht**: Status, letzter Sync, Liste der zuletzt geladenen Dateien mit Kurs und Zielordner
 * **Kurse**: Tabelle ILIAS Kurs → lokaler Ordner, Dropdown zum Ändern, Checkboxen pro Kurs für Videos/Foren/Übungen, Regeln bearbeiten
 * **Vorschau**: Dry Run Ergebnis als Baum ("so würde einsortiert"), bevor es echt läuft
-* **Einstellungen**: Basisordner, Intervall, Parallelität, Autostart, Konto (Uni-ID, abmelden = Keyring und Cookies löschen)
+* **Einstellungen**: Button "Jetzt synchronisieren", Basisordner, Intervall, Parallelität, Semester Ordner, Autostart, Konto (Uni-ID, abmelden = Keyring und Cookies löschen)
 * **Log**: letzte Meldungen, Button "Log Ordner öffnen"
 
 ### Setup Wizard (erster Start)
 
 1. Uni-ID + Passwort, Login testen
-2. **Basispfad einmalig festlegen**: Eingabefeld + "Durchsuchen" Button (nativer Ordnerdialog). Ab diesem Pfad erstellt das Tool alle Unterordner selbst (siehe Abschnitt "Ordneraufbau ab Basispfad"). Pfad wird geprüft (existiert, beschreibbar), fehlende Ordner werden nach Bestätigung angelegt. Danach nur noch in den Einstellungen änderbar, mit Warnung und ohne Dateien zu verschieben
+2. **Basispfad einmalig festlegen**: Eingabefeld + "Durchsuchen" Button (nativer Ordnerdialog). Ab diesem Pfad erstellt das Tool alle Unterordner selbst (siehe Abschnitt "Ordneraufbau ab Basispfad"). Pfad wird geprüft (existiert, beschreibbar, Uni Ordner leer oder noch nicht vorhanden), fehlende Ordner werden nach Bestätigung angelegt. Der erste Sync läuft nur in einen leeren Uni Ordner, ein Uni Ordner mit Inhalt wird abgelehnt. Danach nur noch in den Einstellungen änderbar, mit Warnung und ohne Dateien zu verschieben
 3. Kurse abrufen. Ist der Basispfad leer: Struktur vorschlagen und anlegen. Enthält er schon Ordner: Zuordnung zu vorhandenen Kursordnern per Fuzzy Match vorschlagen. Nutzer bestätigt/korrigiert
 4. Dry Run anzeigen
 5. Erster echter Sync
