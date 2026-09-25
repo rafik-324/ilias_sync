@@ -412,3 +412,56 @@ def test_suggest_courses_skips_configured_and_existing(root):
                     courses=[CourseConfig(3, "Anderes Fach [V] (HWS 2026)", "07_anderes")])
     got = [(c.ref_id, c.local_dir) for c in m.suggest_courses(CrawlResult(courses=courses))]
     assert got == [(2, "08_neues_fach")]
+
+
+# ---------------- Videos in eigenen Unterordner ----------------
+
+PI1_V = "Praktische Informatik I [V] [1. PG] (HWS 2026)"
+
+
+def test_videos_go_to_subfolder_next_to_pdfs(tmp_path):
+    course = crs(1, PI1_V)
+    got = map_one(tmp_path, course, [
+        ("fold", "01 Vom Problem zum Programm", 10),
+        ("file", "01 Vom Problem zum Programm / 01_01_VomProblemZumProgramm.pdf", 11),
+        ("file", "01 Vom Problem zum Programm / 01 01 VomProblemZumProgramm.mp4", 12),
+        ("file", "01 Vom Problem zum Programm / 01 02 Algorithmen.MP4", 13),
+        ("file", "Einführung.mp4", 14),
+    ], courses=[CourseConfig(1, PI1_V, "02_praktische_informatik_i")], semesters={"HWS 2026": "01_SEMESTER"})
+    base = "01_SEMESTER/02_praktische_informatik_i/01_Vorlesung"
+    assert got == {
+        "01 Vom Problem zum Programm / 01_01_VomProblemZumProgramm.pdf":
+            f"{base}/01 Vom Problem zum Programm/01_01_VomProblemZumProgramm.pdf",
+        "01 Vom Problem zum Programm / 01 01 VomProblemZumProgramm.mp4":
+            f"{base}/01 Vom Problem zum Programm/01_Videos/01 01 VomProblemZumProgramm.mp4",
+        "01 Vom Problem zum Programm / 01 02 Algorithmen.MP4":
+            f"{base}/01 Vom Problem zum Programm/01_Videos/01 02 Algorithmen.MP4",
+        "Einführung.mp4": f"{base}/01_Videos/Einführung.mp4",
+    }
+
+
+def test_video_folder_from_ilias_gets_no_extra_subfolder(tmp_path):
+    course = crs(1, PI1_V)
+    got = map_one(tmp_path, course, [
+        ("fold", "Aufzeichnungen 2026", 10),
+        ("file", "Aufzeichnungen 2026 / woche1.mp4", 11),
+        ("fold", "Vorlesungsaufzeichnungen", 20),
+        ("file", "Vorlesungsaufzeichnungen / woche2.mp4", 21),
+    ], courses=[CourseConfig(1, PI1_V, "02_praktische_informatik_i")], semesters={"HWS 2026": "01_SEMESTER"})
+    base = "01_SEMESTER/02_praktische_informatik_i/01_Vorlesung"
+    assert got["Aufzeichnungen 2026 / woche1.mp4"] == f"{base}/Aufzeichnungen 2026/woche1.mp4"
+    # Reiner Kategoriename verschwindet im Pfad, dann doch eigener Video Ordner
+    assert got["Vorlesungsaufzeichnungen / woche2.mp4"] == f"{base}/01_Videos/woche2.mp4"
+
+
+def test_existing_local_video_folder_is_reused(tmp_path):
+    (tmp_path / "01_SEMESTER/02_pi/01_Vorlesung/03_videos").mkdir(parents=True)
+    (tmp_path / "01_SEMESTER/02_pi/01_Vorlesung/04_Folien").mkdir(parents=True)
+    course = crs(1, PI1_V)
+    got = map_one(tmp_path, course, [("file", "a.mp4", 11)],
+                  courses=[CourseConfig(1, PI1_V, "02_pi")], semesters={"HWS 2026": "01_SEMESTER"})
+    assert got["a.mp4"] == "01_SEMESTER/02_pi/01_Vorlesung/03_videos/a.mp4"
+    (tmp_path / "01_SEMESTER/02_pi/01_Vorlesung/03_videos").rmdir()
+    got = map_one(tmp_path, course, [("file", "a.mp4", 11)],
+                  courses=[CourseConfig(1, PI1_V, "02_pi")], semesters={"HWS 2026": "01_SEMESTER"})
+    assert got["a.mp4"] == "01_SEMESTER/02_pi/01_Vorlesung/05_Videos/a.mp4"

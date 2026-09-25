@@ -11,6 +11,8 @@ Regeln laut CLAUDE.md Abschnitt "Mapping":
             wie "Dateien" übersprungen), sonst Kürzel des Kurses, sonst Gruppenname
   Ordner    vorhandene lokale Ordner werden wiederverwendet (Vergleich ohne
             Nummernpräfix, ohne Groß/Kleinschreibung, Umlaute normalisiert)
+  Videos    in einen Unterordner NN_Videos des Ordners, in dem sie sonst lägen,
+            außer ein übernommener ILIAS Ordner auf dem Weg ist schon ein Video Ordner
 
 Der Mapper liest das lokale Dateisystem nur (Ordnernamen), er legt nichts an.
 """
@@ -31,6 +33,10 @@ from .platform_utils import nfc, sanitize_name
 log = logging.getLogger(__name__)
 
 NEW_COURSES_DIR = "_Neue_Kurse"
+VIDEO_DIR = "Videos"
+VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".mkv", ".webm", ".avi", ".wmv"}
+# Ordnernamen, die schon Video Ordner sind (Wortteil, nach fold)
+VIDEO_FOLDER_WORDS = ("video", "aufzeichnung", "recording", "screencast")
 NO_SEMESTER_DIR = "_Ohne_Semester"
 
 # Kategorien in Tabellenreihenfolge: (Name, Schlüsselwörter)
@@ -96,6 +102,14 @@ def loose_folder_key(name: str) -> frozenset[str]:
 def number_prefix(name: str) -> int | None:
     m = re.match(r"^(\d{1,3})_", name)
     return int(m.group(1)) if m else None
+
+
+def is_video_name(name: str) -> bool:
+    return Path(name).suffix.lower() in VIDEO_SUFFIXES
+
+
+def is_video_folder(name: str) -> bool:
+    return any(v in w for w in words(name) for v in VIDEO_FOLDER_WORDS)
 
 
 def is_ignored(name: str, patterns: list[str]) -> bool:
@@ -364,6 +378,22 @@ class Mapper:
         self._resolved[cache_key] = name
         return name
 
+    def resolve_video_dir(self, parent: tuple[str, ...]) -> str:
+        """Unterordner für Videos: vorhandenen Video Ordner nutzen, sonst NN_Videos mit
+        der nächsten freien Nummer unter den Geschwistern."""
+        cache_key = (parent, "\0videos")
+        if cache_key in self._resolved:
+            return self._resolved[cache_key]
+        existing = [d for d in self.tree.subdirs(parent) if " ".join(words(strip_number_prefix(d))) in ("video", "videos")]
+        if existing:
+            name = existing[0]
+        else:
+            siblings = [*self.tree.subdirs(parent, include_ignored=True), *self._planned.get(parent, [])]
+            numbers = [n for n in (number_prefix(d) for d in siblings) if n is not None]
+            name = self._plan(parent, f"{max(numbers, default=0) + 1:02d}_{VIDEO_DIR}")
+        self._resolved[cache_key] = name
+        return name
+
     # ---------- Kurse ----------
 
     def map_course(self, course: Course, semester_dirs: dict[str, str]) -> CourseMapping:
@@ -490,6 +520,8 @@ class Mapper:
                     rel = note(rel, self.resolve_category(rel, category))
         for name in rest:
             rel = note(rel, self.resolve_folder(rel, name))
+        if obj.type == "file" and is_video_name(obj.name) and not any(is_video_folder(n) for n in rest):
+            rel = note(rel, self.resolve_video_dir(rel))
         return MappedItem(obj, course, (*rel, sanitize_name(obj.name)), category, cm.exists, new_dirs)
 
     def _rule_target(self, course: Course, obj: IliasObject, ancestors: list[IliasObject]) -> str | None:

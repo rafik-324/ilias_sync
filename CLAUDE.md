@@ -256,6 +256,7 @@ Enthält ein Name Schlüsselwörter mehrerer Kategorien (z. B. `Linux: Folien un
 
 * Existiert lokal bereits ein passender Ordner (Vergleich ohne Nummernpräfix, ohne Groß/Kleinschreibung, Umlaute normalisiert), **diesen verwenden**. Also `02_tutorium` wird für Kategorie Tutorium genutzt, kein zweiter Ordner angelegt
 * Existiert keiner: neuen Ordner mit nächster freier Nummer anlegen, Schreibweise nach Mehrheit im Kurs (z. B. `03_Tutorium`)
+* **Videos** (Wunsch des Nutzers) kommen in einen Unterordner `NN_Videos` des Ordners, in dem sie sonst neben den PDFs lägen, z. B. `02_praktische_informatik_i/01_Vorlesung/01 Vom Problem zum Programm/01_Videos/`. Ein vorhandener lokaler Ordner `videos` wird wiederverwendet. Kein Extra Ordner, wenn ein übernommener ILIAS Ordner schon nach Video klingt (`video`, `aufzeichnung`, `recording`, `screencast`)
 * Tiefere Ebenen werden 1:1 aus ILIAS übernommen (gleiche Normalisierung, damit vorhandene Ordner wie `01_tutorium` wiedergefunden werden)
 
 ### 4. Config Regeln (Ausnahmen, haben Vorrang)

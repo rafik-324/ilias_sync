@@ -34,11 +34,9 @@ from .api import (
     ActionKind, Config, DownloadedFile, IliasCourse, ItemStatus, PlannedAction, Progress, SyncResult, SyncRun,
 )
 from .crawler import Throttle
-from .mapper import CourseMapping, MappedItem, MappingResult
+from .mapper import CourseMapping, MappedItem, MappingResult, is_video_name
 from .platform_utils import fit_path
 from .state import Item, State, rel_to_str, str_to_path
-
-VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".mkv", ".webm", ".avi", ".wmv"}
 
 log = logging.getLogger(__name__)
 
@@ -55,7 +53,7 @@ class Job:
 
 
 def is_video(item: MappedItem) -> bool:
-    return Path(item.obj.name).suffix.lower() in VIDEO_SUFFIXES
+    return is_video_name(item.obj.name)
 
 
 def ilias_path(item: MappedItem) -> str:
