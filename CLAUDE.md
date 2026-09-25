@@ -404,6 +404,12 @@ Entscheidung des Nutzers (2026-09-25): **Der erste echte Sync läuft in einen ko
 * Kurse ohne Zuordnung bekommen beim Sync `NN_kursname` Ordner (`Mapper.suggest_courses`), gespeichert in der Config. Kurse derselben Veranstaltung ([V], [Ü], [T], Tut Gruppe) teilen sich einen Ordner
 * Der Index liegt pro Uni Ordner im Datenverzeichnis, lokale Pfade relativ zum Uni Ordner
 
+**Erster echter Sync erledigt (2026-09-25)**: Config `base_dir` = `C:\Users\rafik\OneDrive\Uni_neu` (alte Config gesichert als `config_vor_Uni_neu.toml` im Config Verzeichnis). 282 Dateien, 4,0 GB, 0 Fehler; zweiter Lauf: nichts zu tun. Die Kurszuordnungen `NN_kursname` stehen jetzt in der Config.
+
+Nächste Schritte Backend:
+* Echte `api.Api` für die GUI (GUI Agent wartet darauf, zuerst dry_run, sync, last_run, recent_files, removed_items, redownload, Konto und Config Methoden, dann check_base_dir, fetch_courses, suggest_mapping)
+* Danach Hintergrund Sync, Autostart, Builds
+
 Ausnahme: Die GUI (Meilenstein 6) kann parallel von einem eigenen Agenten gegen `gui/fake_backend.py` entwickelt werden (siehe `GUI_KONTEXT.md`). `api.py` entsteht schrittweise mit den Backend Meilensteinen und ersetzt dann die Attrappe.
 
 ## Tests
