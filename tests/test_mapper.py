@@ -382,7 +382,10 @@ def test_course_dir_name():
     assert mapper.course_dir_name("Programmierpraktikum I, Große Übung [Ü] (HWS 2026)", PATTERN) \
         == "programmierpraktikum_i"
     assert mapper.course_dir_name("IS 201 Wirtschaftsinformatik I: Einführung und Grundlagen [V] (HWS 2026)",
-                                  PATTERN) == "is_201_wirtschaftsinformatik_i_einführung_und_grundlagen"
+                                  PATTERN) == "wirtschaftsinformatik_i"
+    assert mapper.course_dir_name("CS 560 Datenbanken I [V] (FSS 2027)", PATTERN) == "datenbanken_i"
+    assert mapper.course_dir_name("Mathematik I für Wirtschaftsinformatiker [V] (HWS 2026)", PATTERN) \
+        == "mathematik_i_für_wirtschaftsinformatiker"
     assert mapper.course_dir_name("[V] (HWS 2026)", PATTERN) == "kurs"
 
 

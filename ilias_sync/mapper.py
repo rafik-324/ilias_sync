@@ -214,6 +214,9 @@ def course_dir_name(ilias_name: str, semester_pattern: str) -> str:
     name = re.sub(r"\[[^\]]*\]", " ", name)
     name = re.sub(r"(,\s*)?\b(gro(ß|ss)e|kleine)\s+(Übung|Uebung)\b", " ", name, flags=re.IGNORECASE)
     name = re.sub(r"\s-\s*Tut\b.*$", " ", name, flags=re.IGNORECASE)
+    # Kurz halten: Untertitel nach ":" und Modulkürzel wie "IS 201" am Anfang weglassen
+    name = name.split(":", 1)[0]
+    name = re.sub(r"^\s*[A-Z]{2,5}\s?\d{2,4}[a-z]?\s+", " ", name)
     name = re.sub(r"[,;:!?()\[\]{}'\"]", " ", nfc(name)).lower()
     name = re.sub(r"\s+", "_", sanitize_name(name).strip()).strip("._-")
     return name or "kurs"
