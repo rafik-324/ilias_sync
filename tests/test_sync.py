@@ -231,3 +231,12 @@ def test_first_sync_needs_empty_root(env):
     assert "leeren" in sync.check_first_sync(st, root)      # fremder Inhalt
     st.start_run(datetime.now())
     assert sync.check_first_sync(st, root) is None          # später: eigener Inhalt
+
+
+def test_too_long_path_is_reported(env):
+    root, st = env
+    item = mapped(1, name="x" * 300 + ".pdf")
+    item.rel_path = ("a" * 240, "b.pdf")
+    problems = []
+    assert sync.plan(mapping(item), st, root, Config(base_dir=None), problems) == []
+    assert len(problems) == 1 and "Pfad zu lang" in problems[0]

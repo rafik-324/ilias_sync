@@ -465,3 +465,45 @@ def test_existing_local_video_folder_is_reused(tmp_path):
     got = map_one(tmp_path, course, [("file", "a.mp4", 11)],
                   courses=[CourseConfig(1, PI1_V, "02_pi")], semesters={"HWS 2026": "01_SEMESTER"})
     assert got["a.mp4"] == "01_SEMESTER/02_pi/01_Vorlesung/05_Videos/a.mp4"
+
+
+def test_new_category_folders_in_fixed_order(tmp_path):
+    """ILIAS liefert Tutorium zuerst, trotzdem 01_Vorlesung, 02_Übung, 03_Tutorium."""
+    mk = crs(1, "Marketing [V] (HWS 2026)")
+    got = map_one(tmp_path, mk, [
+        ("fold", "Tutorium", 10),
+        ("file", "Tutorium / t.pdf", 11),
+        ("fold", "Übung", 20),
+        ("file", "Übung / u.pdf", 21),
+        ("file", "v.pdf", 30),
+    ], courses=[CourseConfig(1, mk.name, "01_marketing")], semesters={"HWS 2026": "01_SEMESTER"})
+    assert got == {
+        "Tutorium / t.pdf": "01_SEMESTER/01_marketing/03_Tutorium/t.pdf",
+        "Übung / u.pdf": "01_SEMESTER/01_marketing/02_Übung/u.pdf",
+        "v.pdf": "01_SEMESTER/01_marketing/01_Vorlesung/v.pdf",
+    }
+
+
+def test_category_order_across_courses_in_same_folder(tmp_path):
+    t = crs(1, "Praktische Informatik I [T] (HWS 2026)")
+    v = crs(2, PI1_V)
+    result = CrawlResult(courses=[t, v], objects={1: tree(t, [("file", "t.pdf", 11)]),
+                                                  2: tree(v, [("file", "v.pdf", 21)])})
+    cfg = dict(courses=[CourseConfig(1, t.name, "02_pi"), CourseConfig(2, v.name, "02_pi")],
+               semesters={"HWS 2026": "01_SEMESTER"})
+    got = sorted("/".join(it.rel_path) for it in make_mapper(tmp_path, **cfg).map_crawl(result).items)
+    assert got == ["01_SEMESTER/02_pi/01_Vorlesung/v.pdf", "01_SEMESTER/02_pi/02_Tutorium/t.pdf"]
+
+
+def test_sheets_fall_back_to_exercise_before_tutorial(tmp_path):
+    fg = crs(1, "Formale Grundlagen der Informatik [V] (HWS 2026)")
+    got = map_one(tmp_path, fg, [
+        ("fold", "Tutorium", 10),
+        ("file", "Tutorium / t.pdf", 11),
+        ("fold", "Übungsblätter", 20),
+        ("file", "Übungsblätter / ub01.pdf", 21),
+    ], courses=[CourseConfig(1, fg.name, "02_fg")], semesters={"HWS 2026": "01_SEMESTER"})
+    assert got == {
+        "Tutorium / t.pdf": "01_SEMESTER/02_fg/02_Tutorium/t.pdf",
+        "Übungsblätter / ub01.pdf": "01_SEMESTER/02_fg/01_Übung/ub01.pdf",
+    }

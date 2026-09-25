@@ -78,8 +78,9 @@ def ilias_changed(entry: Item, item: MappedItem) -> bool:
     return obj.size is not None and entry.size is not None and obj.size != entry.size
 
 
-def plan(mapping: MappingResult, st: State, root: Path, cfg: Config) -> list[Job]:
-    """Aktionen für alle gewünschten Dateien. Liest Dateisystem und Index, schreibt nichts."""
+def plan(mapping: MappingResult, st: State, root: Path, cfg: Config, problems: list[str] | None = None) -> list[Job]:
+    """Aktionen für alle gewünschten Dateien. Liest Dateisystem und Index, schreibt nichts.
+    Dateien, die nicht ablegbar sind (Pfad zu lang), landen als Text in problems."""
     index = st.all_items()
     jobs: list[Job] = []
     for item in mapping.items:
@@ -98,8 +99,11 @@ def plan(mapping: MappingResult, st: State, root: Path, cfg: Config) -> list[Job
             continue
         try:
             target = fit_path(root.joinpath(*item.rel_path))
-        except ValueError as e:
-            log.warning("Übersprungen: %s", e)
+        except ValueError:
+            text = f"Pfad zu lang ({len(str(root.joinpath(*item.rel_path)))} Zeichen): {'/'.join(item.rel_path)}"
+            log.warning("Übersprungen: %s", text)
+            if problems is not None:
+                problems.append(text)
             continue
         kind = ActionKind.CONFLICT if target.exists() else ActionKind.NEW
         jobs.append(Job(kind, item, target, entry))

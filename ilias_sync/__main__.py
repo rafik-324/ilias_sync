@@ -421,8 +421,12 @@ def cmd_sync(dry_run: bool, output: Path | None) -> int:
         if suggestions and not dry_run:
             config.save_config(cfg)
         mapping = mapper.Mapper(cfg, root).map_crawl(result)
-        jobs = sync.plan(mapping, st, root, cfg)
+        problems: list[str] = []
+        jobs = sync.plan(mapping, st, root, cfg, problems)
         lines = format_plan(jobs, root, suggestions, sync.unassigned_courses(mapping))
+        if problems:
+            lines.append(f"NICHT MÖGLICH: {len(problems)} Dateien, bitte kürzeren Basisordner wählen")
+            lines += [f"  {p}" for p in problems]
         if result.failed:
             lines.append(f"Nicht gelesene ILIAS Seiten: {', '.join(result.failed)}")
         print("\n".join(lines))

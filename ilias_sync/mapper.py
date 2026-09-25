@@ -55,7 +55,10 @@ CATEGORY_LOCAL_NAMES = {
     "Übungsblätter": ["übungsblätter", "übungsblatt"],
     "Abgaben": ["abgaben", "abgabe"],
 }
-COURSE_SUFFIX_CATEGORIES = {"v": "Vorlesung", "ü": "Übung", "ue": "Übung", "t": "Tutorium"}
+# Reihenfolge der Nummern neuer Kategorieordner. Übungsblätter direkt nach Übung,
+# weil sie ohne eigenen lokalen Ordner in den Übungsordner fallen
+CATEGORY_NUMBER_ORDER = ["Vorlesung", "Übung", "Übungsblätter", "Tutorium", "Abgaben"]
+COURSE_SUFFIX_CATEGORIES ={"v": "Vorlesung", "ü": "Übung", "ue": "Übung", "t": "Tutorium"}
 # Allgemeine Sammelordner, zählen bei der Kategorieerkennung nicht als Ebene
 TRANSPARENT_FOLDERS = {"dateien", "files", "materialien", "material", "unterlagen"}
 # Füllwörter, die einen Ordner nicht von seiner Kategorie unterscheiden
@@ -453,8 +456,9 @@ class Mapper:
     def map_crawl(self, result: CrawlResult) -> MappingResult:
         semester_dirs = self.semester_dirs(result)
 
-        items: list[MappedItem] = []
+        # 1. Alle Objekte mit ihren ILIAS Ordnern sammeln
         mappings: list[CourseMapping] = []
+        work: list[tuple[IliasObject, Course, CourseMapping, tuple[str, ...], list[IliasObject]]] = []
         for course in result.courses:
             if course.ref_id in result.nested_in:
                 continue
@@ -468,7 +472,27 @@ class Mapper:
                 if obj.is_container:
                     stack.append(obj)
                     continue
-                items.append(self._map_object(obj, course, cm, course_rel, list(stack)))
+                work.append((obj, course, cm, course_rel, list(stack)))
+
+        # 2. Neue Kategorieordner in fester Reihenfolge nummerieren (01_Vorlesung, 02_Übung,
+        #    03_Tutorium ...), nicht in der Reihenfolge, in der ILIAS die Dateien liefert.
+        #    Mehrere ILIAS Kurse im selben Kursordner zählen zusammen. Nur Dateien zählen.
+        needed: dict[tuple[str, ...], set[str]] = {}
+        for obj, course, cm, course_rel, ancestors in work:
+            if obj.type != "file" or cm.source in ("neu", "ohne Semester"):
+                continue
+            if self._rule_target(course, obj, ancestors):
+                continue
+            category, _ = self._category_and_rest(course, ancestors)
+            if category:
+                needed.setdefault(course_rel, set()).add(category)
+        for course_rel, categories in needed.items():
+            for category in sorted(categories, key=CATEGORY_NUMBER_ORDER.index):
+                self.resolve_category(course_rel, category)
+
+        # 3. Zielpfade
+        items = [self._map_object(obj, course, cm, course_rel, ancestors)
+                 for obj, course, cm, course_rel, ancestors in work]
         return MappingResult(items=items, courses=mappings, semesters=semester_dirs)
 
     def _category_and_rest(self, course: Course, ancestors: list[IliasObject]) -> tuple[str | None, list[str]]:
