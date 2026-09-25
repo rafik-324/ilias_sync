@@ -241,7 +241,7 @@ class OverviewTab(Page):
         else:
             self.status_text.setText(HERO_TEXT[state])
 
-        run = c.api.last_run() if c.config is not None else None
+        run = c.last_run
         last = logic.relative_time(run.finished_at or run.started_at) if run else "noch nie"
         if c.paused:
             nxt = "pausiert"

@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
 )
 
 from ilias_sync.api import BaseDirCheck, CourseConfig, IliasCourse, MappingSuggestion, PlannedAction
-from ilias_sync.gui import logic, theme
+from ilias_sync.gui import theme
 from ilias_sync.gui.controller import error_text
 from ilias_sync.gui.icons import app_icon
 from ilias_sync.gui.widgets import (
@@ -91,7 +91,8 @@ class BaseDirPage(QWizardPage):
         super().__init__()
         self.api = api
         self.setTitle("Basisordner festlegen")
-        self.setSubTitle("Unter diesem Ordner legt ILIAS Sync alle Unterordner selbst an.")
+        self.setSubTitle("Unter diesem Ordner legt ILIAS Sync alle Unterordner selbst an. "
+                         "Der erste Sync braucht einen neuen oder leeren Uni Ordner.")
         self._check: BaseDirCheck | None = None
         try:
             self.root_name = api.load_config().root_folder_name
@@ -120,8 +121,9 @@ class BaseDirPage(QWizardPage):
         lay.addWidget(role_label("So wird es aussehen", "section"))
         lay.addWidget(self.structure)
         lay.addStretch(1)
-        lay.addWidget(hint_label("Der Ordner kann später in den Einstellungen geändert werden. "
-                                 "Dabei werden keine Dateien verschoben."))
+        lay.addWidget(hint_label("Ein Uni Ordner, in dem schon Dateien liegen, wird nicht befüllt. "
+                                 "So kommt nichts mit deinen eigenen Unterlagen durcheinander. "
+                                 "Der Ordner kann später in den Einstellungen geändert werden."))
 
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
@@ -129,10 +131,6 @@ class BaseDirPage(QWizardPage):
         self._timer.timeout.connect(self._run_check)
 
     def initializePage(self) -> None:  # noqa: N802
-        if not self.path.text():
-            found = logic.find_existing_base(self.root_name)
-            if found is not None:
-                self.path.setText(str(found))
         self._run_check()
 
     def _browse(self) -> None:
@@ -167,25 +165,32 @@ class BaseDirPage(QWizardPage):
         elif not c.exists:
             self.status.setText("Der Ordner existiert noch nicht und wird nach Rückfrage angelegt.")
             theme.set_role(self.status, "warning")
+        elif not c.is_empty:
+            self.status.setText(
+                f"Hier gibt es schon einen Ordner {self.root_name} mit Inhalt. Der erste Sync läuft nur in "
+                "einen neuen oder leeren Uni Ordner. Bitte einen anderen Basisordner wählen."
+            )
+            theme.set_role(self.status, "error")
         elif c.has_root_folder:
-            sem = ", ".join(c.existing_semesters) or "keine"
-            self.status.setText(f"Vorhandener Ordner {self.root_name} gefunden (Semester: {sem}). Er wird weiterverwendet.")
+            self.status.setText(f"Leerer Ordner {self.root_name} gefunden. Er wird verwendet.")
             theme.set_role(self.status, "success")
         else:
             self.status.setText(f"Ordner ist nutzbar. {self.root_name} wird darin angelegt.")
             theme.set_role(self.status, "success")
-        sems = c.existing_semesters or ["01_SEMESTER"]
-        lines = [str(path), f"└── {self.root_name}/"]
-        for i, s in enumerate(sems):
-            last = i == len(sems) - 1
-            lines.append(f"    {'└──' if last else '├──'} {s}/")
-        lines.append("        └── NN_kursname/NN_Kategorie/ ...")
-        self.structure.setText("\n".join(lines))
+        if c.is_empty:
+            self.structure.setText("\n".join([
+                str(path),
+                f"└── {self.root_name}/",
+                "    └── 01_SEMESTER/",
+                "        └── NN_kursname/NN_Kategorie/ ...",
+            ]))
+        else:
+            self.structure.setText("")
         self.completeChanged.emit()
 
     def isComplete(self) -> bool:  # noqa: N802
         c = self._check
-        return c is not None and (not c.exists or c.writable)
+        return c is not None and (not c.exists or c.writable) and c.is_empty
 
     def validatePage(self) -> bool:  # noqa: N802
         path = self._selected()
@@ -269,13 +274,13 @@ class CoursesPage(QWizardPage):
         self.table.setRowCount(0)
         self.progress.start("Kurse werden aus ILIAS abgerufen ...")
 
-        def done(courses: list[IliasCourse]) -> None:
+        def fetch_and_suggest(progress, cancel) -> list[MappingSuggestion]:
+            # suggest_mapping durchsucht das Dateisystem, deshalb ebenfalls im Worker
+            courses: list[IliasCourse] = self.api.fetch_courses(progress, cancel)
+            return self.api.suggest_mapping(courses)
+
+        def done(suggestions: list[MappingSuggestion]) -> None:
             if gen != self._generation:
-                return
-            try:
-                suggestions = self.api.suggest_mapping(courses)
-            except Exception as e:  # noqa: BLE001
-                fail(e)
                 return
             self.progress.stop()
             self._fill(suggestions)
@@ -287,7 +292,7 @@ class CoursesPage(QWizardPage):
             show_error(self.error, error_text(e))
             self.retry.show()
 
-        run_task(self.api.fetch_courses, with_progress=True,
+        run_task(fetch_and_suggest, with_progress=True,
                  on_progress=self.progress.update_progress, on_done=done, on_error=fail)
 
     def _fill(self, suggestions: list[MappingSuggestion]) -> None:

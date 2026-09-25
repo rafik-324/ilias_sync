@@ -7,12 +7,14 @@ from copy import deepcopy
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QCheckBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QHeaderView,
     QInputDialog,
     QLabel,
     QLineEdit,
@@ -20,6 +22,8 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QScrollArea,
     QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -27,6 +31,7 @@ from PySide6.QtWidgets import (
 from ilias_sync.api import ConfigError
 from ilias_sync.gui import logic, theme
 from ilias_sync.gui.controller import Controller, error_text
+from ilias_sync.gui.icons import dot
 from ilias_sync.gui.widgets import Page, button, error_label, hint_label, set_muted, show_error
 
 log = logging.getLogger(__name__)
@@ -49,6 +54,11 @@ class SettingsTab(Page):
         self.c = controller
         self.dirty = False
         self._loading = False
+        self._account_key: tuple | None = None
+
+        self.btn_sync = button("Jetzt synchronisieren", "primary")
+        self.btn_sync.clicked.connect(self._sync)
+        self.actions.addWidget(self.btn_sync)
 
         self.error = error_label()
 
@@ -67,7 +77,8 @@ class SettingsTab(Page):
         f1 = _form(box_storage)
         f1.addRow("Basisordner", base_row)
         f1.addRow("Name des Uni Ordners", self.root_name)
-        f1.addRow("", hint_label("Wird unter dem Basisordner angelegt bzw. weiterverwendet."))
+        f1.addRow("", hint_label("Wird unter dem Basisordner angelegt. Ein neuer Basisordner oder Name bedeutet "
+                                 "einen neuen Uni Ordner, der erste Sync dorthin braucht einen leeren Ordner."))
 
         # Sync
         self.interval = QSpinBox()
@@ -92,6 +103,24 @@ class SettingsTab(Page):
         f2.addRow("Semester Muster", self.pattern)
         f2.addRow("", self.pattern_hint)
         f2.addRow("", self.autostart)
+
+        # Semester Ordner
+        self.sem_table = QTableWidget(0, 2)
+        self.sem_table.setHorizontalHeaderLabels(["Semester (aus Kursname)", "Ordner"])
+        self.sem_table.verticalHeader().hide()
+        self.sem_table.verticalHeader().setDefaultSectionSize(34)
+        self.sem_table.setShowGrid(False)
+        self.sem_table.horizontalHeader().setHighlightSections(False)
+        self.sem_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.sem_table.setMaximumHeight(150)
+        self.sem_table.itemChanged.connect(self._changed)
+        box_sem = QGroupBox("Semester Ordner")
+        v_sem = QVBoxLayout(box_sem)
+        v_sem.setContentsMargins(0, 8, 0, 0)
+        v_sem.setSpacing(10)
+        v_sem.addWidget(hint_label("Welches Semester in welchem Ordner landet, z. B. HWS 2026 in 01_SEMESTER. "
+                                   "Leere Einträge werden beim nächsten Sync mit der nächsten Nummer angelegt."))
+        v_sem.addWidget(self.sem_table)
 
         # Ignorieren
         self.ignore = QListWidget()
@@ -148,6 +177,7 @@ class SettingsTab(Page):
         inner.addWidget(self.error)
         inner.addWidget(box_storage)
         inner.addWidget(box_sync)
+        inner.addWidget(box_sem)
         inner.addWidget(box_ignore)
         inner.addWidget(box_account)
         inner.addStretch(1)
@@ -160,7 +190,7 @@ class SettingsTab(Page):
         self.body.addLayout(save_row)
 
         self.c.config_changed.connect(self._on_config_changed)
-        self.c.state_changed.connect(self._refresh_account)
+        self.c.state_changed.connect(self._refresh_state)
         self.load()
 
     # ---------------- Laden ----------------
@@ -181,16 +211,52 @@ class SettingsTab(Page):
             self.pattern.setText(cfg.semester_pattern)
             self.ignore.clear()
             self.ignore.addItems(cfg.ignore_local_dirs)
+            self._fill_semesters(logic.semester_rows(cfg))
         try:
             self.autostart.setChecked(self.c.api.autostart_enabled())
         except Exception:  # noqa: BLE001
             log.exception("Autostart Status nicht lesbar")
         self._check_pattern()
-        self._refresh_account()
+        self._refresh_account(force=True)
+        self._refresh_state()
         self._loading = False
         self._set_dirty(False)
 
-    def _refresh_account(self) -> None:
+    def _fill_semesters(self, rows: list[tuple[str, str]]) -> None:
+        self.sem_table.blockSignals(True)
+        self.sem_table.setRowCount(len(rows))
+        for row, (sem, folder) in enumerate(rows):
+            key = QTableWidgetItem(sem)
+            key.setFlags(key.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            val = QTableWidgetItem(folder)
+            if not folder:
+                key.setIcon(QIcon(dot(theme.tokens().warning, 8)))
+                val.setToolTip("Leer lassen: wird beim nächsten Sync automatisch mit der nächsten Nummer angelegt")
+            self.sem_table.setItem(row, 0, key)
+            self.sem_table.setItem(row, 1, val)
+        self.sem_table.blockSignals(False)
+
+    def _semesters(self) -> dict[str, str]:
+        result = {}
+        for row in range(self.sem_table.rowCount()):
+            folder = self.sem_table.item(row, 1).text().strip()
+            if folder:
+                result[self.sem_table.item(row, 0).text()] = folder
+        return result
+
+    def _refresh_state(self) -> None:
+        c = self.c
+        self.btn_sync.setEnabled(c.can_sync())
+        self.btn_sync.setText("Anmelden ..." if c.login_needed else "Jetzt synchronisieren")
+        self._refresh_account()
+
+    def _refresh_account(self, force: bool = False) -> None:
+        # Schlüsselbund nur lesen, wenn sich der Anmeldezustand geändert hat,
+        # nicht bei jedem Fortschritt eines Syncs
+        key = (self.c.login_needed,)
+        if not force and key == self._account_key:
+            return
+        self._account_key = key
         user = self.c.api.stored_username()
         if self.c.login_needed or not user:
             self.account.setText(f"Uni-ID: {user}, Anmeldung nötig" if user else "Nicht angemeldet")
@@ -239,6 +305,16 @@ class SettingsTab(Page):
         if not check.exists or not check.writable:
             QMessageBox.warning(self, "Basisordner", check.message or "Der Ordner ist nicht nutzbar.")
             return
+        if not check.is_empty:
+            answer = QMessageBox.warning(
+                self, "Basisordner",
+                "Der Uni Ordner in diesem Basisordner enthält schon Dateien. Hat ILIAS Sync ihn nicht selbst "
+                "befüllt, wird der erste Sync dorthin verweigert, damit nichts mit deinen eigenen Unterlagen "
+                "durcheinanderkommt.\n\nTrotzdem diesen Ordner wählen?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
         self.base_dir.setText(path)
         self._set_dirty(True)
 
@@ -267,6 +343,7 @@ class SettingsTab(Page):
         cfg.max_parallel = self.parallel.value()
         cfg.semester_pattern = self.pattern.text()
         cfg.ignore_local_dirs = [self.ignore.item(i).text() for i in range(self.ignore.count())]
+        cfg.semesters = self._semesters()
         cfg.autostart = self.autostart.isChecked()
 
         errors = logic.validate_settings(cfg)
@@ -302,6 +379,15 @@ class SettingsTab(Page):
             self.load()
             return True
         return False
+
+    def _sync(self) -> None:
+        if self.c.login_needed:
+            self.login_requested.emit()
+            return
+        # Der Sync nutzt die gespeicherte Config, offene Änderungen also vorher klären
+        if not self.confirm_leave():
+            return
+        self.c.start_sync()
 
     def _logout(self) -> None:
         answer = QMessageBox.question(
