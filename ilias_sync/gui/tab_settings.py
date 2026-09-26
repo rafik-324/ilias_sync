@@ -21,7 +21,6 @@ from PySide6.QtWidgets import (
     QListWidget,
     QMessageBox,
     QScrollArea,
-    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -32,7 +31,7 @@ from ilias_sync.api import ConfigError
 from ilias_sync.gui import logic, theme
 from ilias_sync.gui.controller import Controller, error_text
 from ilias_sync.gui.icons import dot
-from ilias_sync.gui.widgets import Page, button, error_label, hint_label, set_muted, show_error
+from ilias_sync.gui.widgets import Page, SpinBox, button, error_label, hint_label, set_muted, show_error
 
 log = logging.getLogger(__name__)
 
@@ -81,12 +80,12 @@ class SettingsTab(Page):
                                  "einen neuen Uni Ordner, der erste Sync dorthin braucht einen leeren Ordner."))
 
         # Sync
-        self.interval = QSpinBox()
+        self.interval = SpinBox()
         self.interval.setRange(15, 1440)
         self.interval.setSingleStep(15)
         self.interval.setSuffix(" Minuten")
         self.interval.valueChanged.connect(self._changed)
-        self.parallel = QSpinBox()
+        self.parallel = SpinBox()
         self.parallel.setRange(1, 5)
         self.parallel.setToolTip("Gleichzeitige Downloads. Höhere Werte belasten den ILIAS Server stärker.")
         self.parallel.valueChanged.connect(self._changed)

@@ -28,7 +28,7 @@ from ilias_sync.gui import logic, theme
 from ilias_sync.gui.controller import Controller, error_text
 from ilias_sync.gui.icons import dot
 from ilias_sync.gui.rules_dialog import RulesDialog
-from ilias_sync.gui.widgets import Card, Page, ProgressPanel, button, error_label, hint_label, role_label, show_error
+from ilias_sync.gui.widgets import Card, ComboBox, Page, ProgressPanel, button, error_label, hint_label, role_label, show_error
 from ilias_sync.gui.worker import run_task
 
 log = logging.getLogger(__name__)
@@ -93,7 +93,7 @@ class ContentsButton(QPushButton):
 
 
 DIR_COL_MIN = 250
-DIR_COL_MAX = 380
+DIR_COL_MAX = 360
 
 
 def _combo_width(combo: QComboBox) -> int:
@@ -139,7 +139,8 @@ class CoursesTab(Page):
         self.table.verticalHeader().setDefaultSectionSize(46)
         self.table.setShowGrid(False)
         self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.table.setWordWrap(False)
+        # lange Kursnamen dürfen zweizeilig umbrechen, der volle Name steht im Tooltip
+        self.table.setWordWrap(True)
         self.table.setIconSize(QSize(8, 8))
         self.table.horizontalHeader().setHighlightSections(False)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
@@ -147,7 +148,7 @@ class CoursesTab(Page):
         h = self.table.horizontalHeader()
         h.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         h.setSectionResizeMode(COL_NAME, QHeaderView.ResizeMode.Stretch)
-        for col, width in ((COL_SEM, 92), (COL_DIR, DIR_COL_MIN), (COL_TYPES, 150), (COL_RULES, 128)):
+        for col, width in ((COL_SEM, 96), (COL_DIR, DIR_COL_MIN), (COL_TYPES, 136), (COL_RULES, 110)):
             h.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
             self.table.setColumnWidth(col, width)
 
@@ -217,7 +218,7 @@ class CoursesTab(Page):
         for row, course in enumerate(courses):
             sem = logic.semester_of(course.ilias_name, self._pattern())
             name_item = QTableWidgetItem(logic.course_display_name(course.ilias_name, self._pattern()))
-            name_item.setToolTip(f"{course.ilias_name}\nref_id {course.ref_id}")
+            name_item.setToolTip(f"{course.ilias_name}\nSemester {sem or 'unbekannt'}\nref_id {course.ref_id}")
             name_item.setData(Qt.ItemDataRole.UserRole, course.ref_id)
             self.table.setItem(row, COL_NAME, name_item)
             self.table.setItem(row, COL_SEM, QTableWidgetItem(sem or "unbekannt"))
@@ -240,6 +241,9 @@ class CoursesTab(Page):
 
         # Spalte so breit, dass lange Ordnernamen nicht abgeschnitten werden
         self.table.setColumnWidth(COL_DIR, min(dir_width, DIR_COL_MAX))
+        # Semester Spalte nur bei mehreren Semestern, sonst steht es im Tooltip des Kursnamens
+        semesters = {logic.semester_of(c.ilias_name, self._pattern()) for c in courses}
+        self.table.setColumnHidden(COL_SEM, len(semesters) <= 1)
 
         if unassigned:
             kurs = "Ein Kurs ist" if unassigned == 1 else f"{unassigned} Kurse sind"
@@ -256,7 +260,7 @@ class CoursesTab(Page):
         return self.cfg.semesters.get(sem) or None
 
     def _dir_combo(self, course: CourseConfig, sem: str | None) -> QComboBox:
-        combo = QComboBox()
+        combo = ComboBox()
         combo.addItem(NICHT_ZUGEORDNET, None)
         sem_dir = self._semester_dir(sem)
         existing: list[str] = []

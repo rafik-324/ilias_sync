@@ -341,3 +341,52 @@ def test_vorschau_login_noetig_wird_angezeigt(qtbot, tmp_path):
     assert c.login_needed
     assert w.preview.error.text() == "Anmeldung bei ILIAS nötig."
     assert w.preview.progress.isHidden()
+
+
+# ---------------- Mausrad, Spalten ----------------
+
+def _wheel(widget):
+    from PySide6.QtCore import QPoint, QPointF, Qt as _Qt
+    from PySide6.QtGui import QWheelEvent
+    pos = QPointF(widget.rect().center())
+    return QWheelEvent(pos, QPointF(widget.mapToGlobal(pos.toPoint())), QPoint(0, 0), QPoint(0, -120),
+                       _Qt.MouseButton.NoButton, _Qt.KeyboardModifier.NoModifier, _Qt.ScrollPhase.NoScrollPhase, False)
+
+
+def test_mausrad_aendert_auswahl_nicht(qtbot):
+    from PySide6.QtCore import Qt as _Qt
+    from PySide6.QtWidgets import QApplication
+    from ilias_sync.gui.widgets import ComboBox, SpinBox
+    combo = ComboBox()
+    qtbot.addWidget(combo)
+    combo.addItems(["a", "b", "c"])
+    spin = SpinBox()
+    qtbot.addWidget(spin)
+    spin.setRange(0, 10)
+    spin.setValue(5)
+    for w in (combo, spin):
+        ev = _wheel(w)
+        QApplication.sendEvent(w, ev)
+        assert not ev.isAccepted()   # geht an den scrollbaren Bereich weiter
+    assert combo.currentIndex() == 0
+    assert spin.value() == 5
+    assert combo.focusPolicy() == _Qt.FocusPolicy.StrongFocus
+
+
+def test_kurse_ordner_dropdowns_ohne_mausrad(qtbot, fake):
+    from PySide6.QtWidgets import QComboBox
+    from ilias_sync.gui.widgets import ComboBox
+    w = MainWindow(Controller(fake))
+    qtbot.addWidget(w)
+    combos = w.courses.table.findChildren(QComboBox)
+    assert combos and all(isinstance(c, ComboBox) for c in combos)
+    assert w.settings.interval.__class__.__name__ == "SpinBox"
+
+
+def test_semester_spalte_nur_bei_mehreren_semestern(qtbot, fake):
+    from ilias_sync.gui.tab_courses import COL_SEM
+    w = MainWindow(Controller(fake))
+    qtbot.addWidget(w)
+    # Fake Config: nur HWS 2025
+    assert w.courses.table.isColumnHidden(COL_SEM)
+    assert "Semester HWS 2025" in w.courses.table.item(0, 0).toolTip()

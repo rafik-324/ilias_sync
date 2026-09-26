@@ -19,7 +19,6 @@ from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
-    QComboBox,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
@@ -38,6 +37,7 @@ from ilias_sync.gui import theme
 from ilias_sync.gui.controller import error_text
 from ilias_sync.gui.icons import app_icon
 from ilias_sync.gui.widgets import (
+    ComboBox,
     LoginForm,
     PreviewTree,
     ProgressPanel,
@@ -302,7 +302,7 @@ class CoursesPage(QWizardPage):
             self.table.setItem(row, self.COL_NAME, QTableWidgetItem(s.course.name))
             self.table.setItem(row, self.COL_SEM, QTableWidgetItem(f"{s.course.semester or '?'} → {s.semester_dir}"))
 
-            combo = QComboBox()
+            combo = ComboBox()
             combo.setEditable(True)
             combo.addItem(NICHT_ZUGEORDNET)
             try:

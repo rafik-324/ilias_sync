@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QHBoxLayout,
@@ -18,7 +17,7 @@ from PySide6.QtWidgets import (
 
 from ilias_sync.api import CourseRule
 from ilias_sync.gui.icons import app_icon
-from ilias_sync.gui.widgets import button, error_label, hint_label, show_error
+from ilias_sync.gui.widgets import ComboBox, button, error_label, hint_label, show_error
 
 TYP_ORDNER = "ILIAS Ordner"
 TYP_DATEI = "Dateiname"
@@ -83,12 +82,12 @@ class RulesDialog(QDialog):
     def _add_row(self, rule: CourseRule) -> None:
         row = self.table.rowCount()
         self.table.insertRow(row)
-        typ = QComboBox()
+        typ = ComboBox()
         typ.addItems([TYP_ORDNER, TYP_DATEI])
         typ.setCurrentText(TYP_DATEI if rule.match_file is not None else TYP_ORDNER)
         self.table.setCellWidget(row, 0, typ)
         self.table.setItem(row, 1, QTableWidgetItem(rule.match_file or rule.match_folder or ""))
-        target = QComboBox()
+        target = ComboBox()
         target.setEditable(True)
         target.addItems(self._targets)
         target.setCurrentText(rule.target)

@@ -42,6 +42,7 @@ STATUS_TEXT = {
 }
 
 CHANGED_ROW = 44
+COURSE_COL = 210
 CHANGED_VISIBLE_ROWS = 2   # weitere per Scrollen, damit die Dateiliste Platz behält
 
 HERO_TEXT = {
@@ -207,7 +208,9 @@ class OverviewTab(Page):
         self.table = list_table(["Datei", "Kurs", "Ordner", "Zeit", ""])
         h = self.table.horizontalHeader()
         h.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        h.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        # echte Kursnamen sind lang ("Praktische Informatik I [Ü] [1. PG]"), daher feste Breite
+        h.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        self.table.setColumnWidth(1, COURSE_COL)
         h.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         h.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         h.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
