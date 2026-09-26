@@ -403,6 +403,15 @@ Sync läuft immer in einem Worker Thread (`QThread`), die GUI blockiert nie.
   `~/.venvs/ilias-sync/bin/pyinstaller packaging/ilias_sync_macos.spec --noconfirm --distpath ~/dev/ilias_sync-build/dist --workpath ~/dev/ilias_sync-build/build`.
   Ergebnis `ILIAS Sync.app` (etwa 104 MB, Bundle ID `de.rafik.ilias-sync`, `LSUIElement`, noch ohne eigenes Icon und unsigniert). Geprüft: startet ohne Dock Icon (`lsappinfo`: UIElement), Schlüsselbund im Bundle funktioniert, `--status` zeigt Pfade, Schlüsselbund, Session und den Autostart Befehl (zeigt auf das Programm in der `.app`). Autostart erst einschalten, wenn die App an ihrem endgültigen Ort liegt (z. B. `/Applications`), sonst zeigt der LaunchAgent ins Leere
 
+### Weitergabe an Kommilitonen (vorgemerkt, erst wenn das Programm fertig ist)
+
+Entscheidung des Nutzers 2026-09-26: Kollegen sollen die Mac App über die private Webseite des Nutzers laden können. Kein Apple Developer Account (zu teuer), also keine Notarisierung.
+* Release Skript: App bauen, als `ILIAS-Sync-<version>.dmg` packen (App plus Verknüpfung zu Programme), SHA-256 Prüfsumme daneben. Signatur bleibt ad hoc (reicht auf Apple Silicon zum Starten)
+* Anleitungstext auf Deutsch für die Webseite: DMG öffnen, App nach Programme ziehen, beim ersten Start einmal Systemeinstellungen → Datenschutz & Sicherheit → "Trotzdem öffnen" (Alternative `xattr -dr com.apple.quarantine`)
+* Hochladen macht der Nutzer selbst, das Tool hat keinen Zugriff auf die Webseite
+* Offen: Universal Build für Intel Macs nötig? (braucht Python von python.org statt Homebrew)
+* Jeder nutzt seine eigene Uni-ID, es werden keine Materialien weitergegeben (siehe Rechtliches)
+
 ## Meilensteine
 
 1. **Auth**: `ilias_login.py` in `auth.py` überführen, Login + Session Wiederverwendung auf Windows und macOS testen
