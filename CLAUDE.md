@@ -399,6 +399,9 @@ Sync läuft immer in einem Worker Thread (`QThread`), die GUI blockiert nie.
 * PyInstaller Spec für macOS (`.app`, `LSUIElement=true`, Icon `.icns`) und Windows (`.exe`, ohne Konsolenfenster, Icon `.ico`)
 * Eigene Icons für hellen und dunklen Modus (macOS Menüleiste: Template Image)
 * `requirements.txt` mit gepinnten Versionen
+* **macOS (Stand 2026-09-26)**: `packaging/ilias_sync_macos.spec` mit Startdatei `packaging/launcher.py` (`__main__.py` nutzt relative Importe und taugt nicht als Skript). Bauen immer nach außerhalb von OneDrive:
+  `~/.venvs/ilias-sync/bin/pyinstaller packaging/ilias_sync_macos.spec --noconfirm --distpath ~/dev/ilias_sync-build/dist --workpath ~/dev/ilias_sync-build/build`.
+  Ergebnis `ILIAS Sync.app` (etwa 104 MB, Bundle ID `de.rafik.ilias-sync`, `LSUIElement`, noch ohne eigenes Icon und unsigniert). Geprüft: startet ohne Dock Icon (`lsappinfo`: UIElement), Schlüsselbund im Bundle funktioniert, `--status` zeigt Pfade, Schlüsselbund, Session und den Autostart Befehl (zeigt auf das Programm in der `.app`). Autostart erst einschalten, wenn die App an ihrem endgültigen Ort liegt (z. B. `/Applications`), sonst zeigt der LaunchAgent ins Leere
 
 ## Meilensteine
 
