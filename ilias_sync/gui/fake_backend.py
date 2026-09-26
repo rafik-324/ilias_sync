@@ -27,7 +27,6 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from ilias_sync.gui import logic
 from ilias_sync.api import (
     ActionKind,
     BaseDirCheck,
@@ -49,13 +48,13 @@ from ilias_sync.api import (
     SessionState,
     SyncResult,
     SyncRun,
+    linux_name,
 )
 
 log = logging.getLogger("ilias_sync.fake")
 
-# Namensregel für alles, was das Tool neu anlegt. Vorhandene Ordner des Nutzers
-# (01_SEMESTER, 01_Vorlesung, 02_Übung ...) behalten ihre Schreibweise, wie in der Praxis.
-linux_name = logic.linux_name
+# Namensregel (api.linux_name) gilt für alles, was das Tool neu anlegt. Vorhandene Ordner
+# des Nutzers (01_SEMESTER, 01_Vorlesung, 02_Übung ...) behalten ihre Schreibweise, wie in der Praxis.
 
 FAKE_PASSWORD_HINT = "Beim Fake Backend funktioniert jedes Passwort außer 'falsch'."
 

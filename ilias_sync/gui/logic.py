@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from ilias_sync.api import ActionKind, ChangedFile, Config, DownloadedFile, PlannedAction, Progress
+from ilias_sync.api import ActionKind, ChangedFile, Config, DownloadedFile, PlannedAction, Progress, linux_name
 
 # ---------------- Zeitangaben ----------------
 
@@ -309,24 +309,6 @@ def next_number(existing: list[str]) -> int:
     """Nächste freie Nummer nach den vorhandenen NN_ Präfixen."""
     numbers = [int(m.group(1)) for name in existing if (m := _PREFIX.match(name))]
     return max(numbers, default=0) + 1
-
-
-_TRANSLITERATION = (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss"))
-
-
-def linux_name(name: str) -> str:
-    """Namensregel für neu angelegte Ordner und Dateien, gleich wie platform_utils.linux_name im
-    Backend (die GUI importiert nur api.py): nur Kleinbuchstaben, Ziffern, "_", "-" und ".",
-    Umlaute als ae/oe/ue/ss. "02_Übung" -> "02_uebung". Ein Test hält beide Fassungen gleich."""
-    name = _nfc(name).lower()
-    for a, b in _TRANSLITERATION:
-        name = name.replace(a, b)
-    name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
-    name = re.sub(r"[^a-z0-9._-]+", "_", name)
-    name = re.sub(r"_{2,}", "_", name)
-    name = re.sub(r"[_-]+\.", ".", name)
-    name = re.sub(r"\.[_-]+", ".", name)
-    return name.lstrip(".-").rstrip("._-")
 
 
 def suggest_course_dir(ilias_name: str, existing: list[str], pattern: str | None = None) -> str:

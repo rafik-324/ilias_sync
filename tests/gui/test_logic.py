@@ -252,11 +252,8 @@ def test_fortschritt_text():
     assert logic.progress_text(Progress("Anmelden", 0, None, None)) == "Anmelden ..."
 
 
-@pytest.mark.parametrize("name", [
-    "02_Übung", "Ü1_MfN_Übungsskript Kernlösung.PDF", "Große Übung", "skript (1).pdf", "_Neue_Kurse",
-    ".versteckt", "-option", "Recht: Grundlagen?", "Café résumé", "a  b__c", "Straße", "IS 201 WI",
-])
-def test_linux_name_gleich_wie_backend(name):
-    # die GUI darf platform_utils nicht importieren, der Test hält beide Fassungen gleich
-    from ilias_sync.platform_utils import linux_name as backend_linux_name
-    assert logic.linux_name(name) == backend_linux_name(name)
+def test_namensregel_kommt_aus_api():
+    # keine eigene Kopie mehr, die GUI nutzt die Funktion des Backends über api.py
+    from ilias_sync import api
+    assert logic.linux_name is api.linux_name
+    assert logic.linux_name("02_Übung") == "02_uebung"
