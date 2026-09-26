@@ -346,9 +346,10 @@ class Api:
             if problem := sync.check_first_sync(st, root):
                 raise ConfigError(problem)
             s, mapping, jobs, problems = self._prepare(cfg, st, root, progress, cancel, save_suggestions=True)
+            # Zu lange Pfade: Datei wird nicht geladen, das soll der Nutzer als Fehler sehen
             result, _ = sync.execute(jobs, mapping, s, st, root, cfg.max_parallel, progress, cancel,
-                                     relogin=self._relogin(s), throttle=crawler.Throttle(crawler.DEFAULT_DELAY))
-        result.errors += [f"Nicht ablegbar: {p}" for p in problems]
+                                     relogin=self._relogin(s), throttle=crawler.Throttle(crawler.DEFAULT_DELAY),
+                                     extra_errors=problems)
         return result
 
     def _load_for_user(self, ref_id: int, load: Callable) -> DownloadedFile:

@@ -472,7 +472,7 @@ def cmd_sync(dry_run: bool, output: Path | None) -> int:
 
         try:
             sync_result, _ = sync.execute(jobs, mapping, s, st, root, cfg.max_parallel, progress,
-                                          relogin=relogin, throttle=throttle)
+                                          relogin=relogin, throttle=throttle, extra_errors=problems)
         except KeyboardInterrupt:
             print("\nAbgebrochen. Geladene Dateien bleiben und stehen im Index, .part Dateien werden entfernt.")
             return 1

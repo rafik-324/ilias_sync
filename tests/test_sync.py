@@ -273,5 +273,19 @@ def test_too_long_path_is_reported(env):
     item = mapped(1, name="x" * 300 + ".pdf")
     item.rel_path = ("a" * 240, "b.pdf")
     problems = []
-    assert sync.plan(mapping(item), st, root, Config(base_dir=None), problems) == []
-    assert len(problems) == 1 and "Pfad zu lang" in problems[0]
+    jobs = sync.plan(mapping(item), st, root, Config(base_dir=None), problems)
+    assert [j.kind for j in jobs] == [ActionKind.SKIP_TOO_LONG]
+    assert jobs[0].target == root.joinpath("a" * 240, "b.pdf")
+    assert len(problems) == 1 and problems[0].startswith("Pfad zu lang (")
+    # Vorschau zeigt die Datei mit ihrem geplanten Ziel
+    actions = sync.planned_actions(jobs, mapping(item), root)
+    too_long = [a for a in actions if a.kind == ActionKind.SKIP_TOO_LONG]
+    assert [a.local_path for a in too_long] == [root.joinpath("a" * 240, "b.pdf")]
+    assert not any(a.kind == ActionKind.CREATE_DIR for a in actions)
+    # Sync: nichts geladen, aber als Fehler gezählt, auch im gespeicherten Lauf
+    session = FakeSession({})
+    result, _ = sync.execute(jobs, mapping(item), session, st, root, 2, extra_errors=problems)
+    assert session.calls == []
+    assert result.errors == problems and result.run.errors == 1
+    assert st.last_run().errors == 1
+    assert st.get(1) is None
