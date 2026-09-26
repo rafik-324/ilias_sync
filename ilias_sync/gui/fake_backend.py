@@ -95,6 +95,17 @@ _FILES: list[tuple[int, str, str, str, int]] = [
 ]
 
 
+def _ilias_name(path: Path) -> Path:
+    """Freier Name <name>_ilias_<Datum>.<ext> neben path, nie eine vorhandene Datei."""
+    stem, suffix, day = path.stem, path.suffix, f"{datetime.now():%Y-%m-%d}"
+    target = path.with_name(f"{stem}_ilias_{day}{suffix}")
+    n = 2
+    while target.exists():
+        target = path.with_name(f"{stem}_ilias_{day}_{n}{suffix}")
+        n += 1
+    return target
+
+
 @dataclass
 class _Item:
     ref_id: int
@@ -175,6 +186,10 @@ class FakeApi:
                 continue
             for cat in cats:
                 (sem / local / cat).mkdir(parents=True, exist_ok=True)
+        # Eigene Datei des Nutzers mit demselben Namen wie eine ILIAS Datei (ergibt CONFLICT)
+        own = sem / "01_marketing" / "02_Übung" / "Fallstudie_1.pdf"
+        if not own.exists():
+            own.write_text("Eigene Notizen, nicht aus ILIAS.\n", encoding="utf-8")
 
     def _seed_history(self) -> None:
         """Ein paar alte Einträge, damit Übersicht und Menü nicht leer sind."""
@@ -431,7 +446,7 @@ class FakeApi:
             elif cfg is None or cfg.local_dir is None:
                 kind = ActionKind.UNASSIGNED
             else:
-                kind = ActionKind.NEW
+                kind = ActionKind.CONFLICT if item.local_path.exists() else ActionKind.NEW
             actions.append(PlannedAction(kind, item.course_ref_id, name, item.ilias_path, item.local_path, item.size))
         if self._sync_count == 0:
             code = self._root() / "01_SEMESTER" / "02_praktische_informatik_I" / "04_code" / "main.py"
@@ -466,7 +481,7 @@ class FakeApi:
             raise InvalidCredentialsError("Anmeldung bei ILIAS nötig.")
         actions = self._plan(progress, cancel)
         # geänderte Dateien werden nur gemeldet, nie automatisch geladen
-        todo = [a for a in actions if a.kind in (ActionKind.NEW, ActionKind.UNASSIGNED)]
+        todo = [a for a in actions if a.kind in (ActionKind.NEW, ActionKind.CONFLICT, ActionKind.UNASSIGNED)]
         new_files: list[DownloadedFile] = []
         errors: list[str] = []
         cancelled = False
@@ -479,10 +494,12 @@ class FakeApi:
                     errors.append(f"{action.local_path.name}: Download abgebrochen (Server antwortet nicht)")
                     log.error("Download fehlgeschlagen: %s", action.local_path.name)
                     continue
-                self._write_file(action.local_path)
+                # Name belegt: die vorhandene Datei bleibt, ILIAS Datei kommt als *_ilias_<Datum> daneben
+                target = _ilias_name(action.local_path) if action.kind == ActionKind.CONFLICT else action.local_path
+                self._write_file(target)
                 item = items[action.local_path]
-                entry = DownloadedFile(item.ref_id, action.course_name, action.local_path.name,
-                                       action.local_path, datetime.now(), ItemStatus.OK)
+                entry = DownloadedFile(item.ref_id, action.course_name, target.name,
+                                       target, datetime.now(), ItemStatus.OK)
                 self._downloaded[item.ref_id] = entry
                 new_files.append(entry)
                 log.info("Heruntergeladen: %s", action.local_path.name)
@@ -523,12 +540,7 @@ class FakeApi:
         self._check_online()
         changed = self._changed[ref_id]
         # neue Version als <name>_ilias_<Datum> daneben, die vorhandene Datei bleibt
-        stem, suffix = changed.local_path.stem, changed.local_path.suffix
-        target = changed.local_path.with_name(f"{stem}_ilias_{datetime.now():%Y-%m-%d}{suffix}")
-        n = 2
-        while target.exists():
-            target = changed.local_path.with_name(f"{stem}_ilias_{datetime.now():%Y-%m-%d}_{n}{suffix}")
-            n += 1
+        target = _ilias_name(changed.local_path)
         self._write_file(target)
         del self._changed[ref_id]
         entry = DownloadedFile(ref_id, changed.course_name, target.name, target, datetime.now(), ItemStatus.UPDATED)

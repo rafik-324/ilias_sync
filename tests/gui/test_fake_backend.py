@@ -26,9 +26,9 @@ def test_dry_run_schreibt_nichts(fake):
     # nur die Logdatei darf sich ändern, keine Downloads
     assert [p for p in after if p.suffix != ".log"] == [p for p in before if p.suffix != ".log"]
     kinds = {a.kind for a in actions}
-    assert {ActionKind.NEW, ActionKind.CHANGED, ActionKind.UNASSIGNED} <= kinds
-    # veraltete Arten erzeugt das Backend nicht mehr
-    assert not kinds & {ActionKind.UPDATE, ActionKind.CONFLICT}
+    assert {ActionKind.NEW, ActionKind.CHANGED, ActionKind.CONFLICT, ActionKind.UNASSIGNED} <= kinds
+    # UPDATE erzeugt das Backend nicht mehr
+    assert ActionKind.UPDATE not in kinds
 
 
 def test_sync_und_zweiter_sync(fake):
@@ -108,6 +108,18 @@ def test_geaenderte_datei_herunterladen_legt_daneben(fake):
     assert entry.local_path.is_file()
     assert changed.local_path.read_bytes() == original
     assert changed.ref_id not in {c.ref_id for c in fake.changed_items()}
+
+
+def test_name_belegt_legt_ilias_datei_daneben(fake):
+    actions = fake.dry_run(_noop, threading.Event())
+    conflict = next(a for a in actions if a.kind == ActionKind.CONFLICT)
+    own = conflict.local_path.read_bytes()
+    result = fake.sync(_noop, threading.Event())
+    assert conflict.local_path.read_bytes() == own
+    loaded = next(f for f in result.new_files if f.local_path.parent == conflict.local_path.parent
+                  and "_ilias_" in f.name)
+    assert loaded.local_path.is_file()
+    assert not any("_alt_" in p.name for p in fake.workdir.rglob("*"))
 
 
 def test_geaenderte_datei_ignorieren(fake):

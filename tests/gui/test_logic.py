@@ -123,7 +123,7 @@ def test_summarize_text():
         _action(ActionKind.SKIP_IGNORED, "e"),
     ]
     assert logic.summarize(actions).text() == (
-        "2 neue Dateien (2,0 MB), 1 Aktualisierung, 1 Konflikt, 1 übersprungen"
+        "2 neue Dateien (2,0 MB), 1 Aktualisierung, 1 mit belegtem Namen, 1 übersprungen"
     )
 
 
