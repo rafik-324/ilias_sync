@@ -36,6 +36,7 @@ WEISS = "#FFFFFF"
 FARBE_FEHLER = QColor("#d13438")
 FARBE_LOGIN = QColor("#e8912d")
 FARBE_PAUSE = QColor("#7a7a7a")
+FARBE_PAUSE_DUNKEL = QColor("#b4b4b8")   # auf dunklem Infobereich sonst kaum sichtbar
 
 # Pfeil Animation: 900 ms Zyklus laut README, 10 Bilder zu je 90 ms
 SYNC_FRAMES = 10
@@ -208,7 +209,8 @@ def _render(size: int, state: IconState, frame: int, template: bool, dark: bool,
         if template:
             fill = QColor(Qt.GlobalColor.black)
         else:
-            fill = {IconState.ERROR: FARBE_FEHLER, IconState.LOGIN: FARBE_LOGIN, IconState.PAUSED: FARBE_PAUSE}[state]
+            pause = FARBE_PAUSE_DUNKEL if dark else FARBE_PAUSE
+            fill = {IconState.ERROR: FARBE_FEHLER, IconState.LOGIN: FARBE_LOGIN, IconState.PAUSED: pause}[state]
         _draw_badge(p, size, state, fill)
     p.end()
     return pm
