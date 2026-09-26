@@ -6,14 +6,13 @@ Die GUI importiert ausschliesslich von hier. Alle Methoden sind synchron und
 Qt frei. Langlaufende Methoden nehmen einen progress Callback und ein cancel
 Token (threading.Event) entgegen.
 
-Die Datentypen und Fehlerklassen sind fertig. Die Methoden von Api werden mit
-den Backend Meilensteinen implementiert, bis dahin nutzt die GUI
-ilias_sync.gui.fake_backend.FakeApi.
+Die Methoden der Fassade stehen in GUI_KONTEXT.md Abschnitt 3.3, umgesetzt in
+backend.py (Klasse Api, über dieses Modul erreichbar). Zum Entwickeln ohne ILIAS
+gibt es ilias_sync.gui.fake_backend.FakeApi.
 """
 
 from __future__ import annotations
 
-import threading
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -202,96 +201,12 @@ class Cancelled(IliasSyncError):
 
 # ---------------- Fassade ----------------
 
-class Api:
-    """Echte Backend Anbindung. Wird mit den Backend Meilensteinen gefüllt."""
+def __getattr__(name: str):
+    """`from ilias_sync.api import Api` liefert die echte Umsetzung aus backend.py.
 
-    # Konto
-    def stored_username(self) -> str | None:
-        raise NotImplementedError
-
-    def has_stored_password(self) -> bool:
-        raise NotImplementedError
-
-    def login(self, user: str, password: str, remember: bool = True) -> None:
-        raise NotImplementedError
-
-    def check_session(self) -> SessionState:
-        raise NotImplementedError
-
-    def logout(self) -> None:
-        raise NotImplementedError
-
-    # Config
-    def config_exists(self) -> bool:
-        raise NotImplementedError
-
-    def load_config(self) -> Config:
-        raise NotImplementedError
-
-    def save_config(self, cfg: Config) -> None:
-        raise NotImplementedError
-
-    # Basispfad
-    def check_base_dir(self, path: Path) -> BaseDirCheck:
-        raise NotImplementedError
-
-    def create_base_structure(self, path: Path) -> None:
-        raise NotImplementedError
-
-    # Kurse
-    def fetch_courses(self, progress: ProgressCallback, cancel: threading.Event) -> list[IliasCourse]:
-        raise NotImplementedError
-
-    def suggest_mapping(self, courses: list[IliasCourse]) -> list[MappingSuggestion]:
-        raise NotImplementedError
-
-    def local_course_dirs(self, semester_dir: str) -> list[str]:
-        raise NotImplementedError
-
-    # Sync
-    def dry_run(self, progress: ProgressCallback, cancel: threading.Event) -> list[PlannedAction]:
-        raise NotImplementedError
-
-    def sync(self, progress: ProgressCallback, cancel: threading.Event) -> SyncResult:
-        raise NotImplementedError
-
-    def redownload(self, ref_id: int) -> DownloadedFile:
-        raise NotImplementedError
-
-    def download_changed(self, ref_id: int) -> DownloadedFile:
-        """Neue ILIAS Version als <name>_ilias_<YYYY-MM-DD>.<ext> neben die vorhandene Datei legen."""
-        raise NotImplementedError
-
-    def dismiss_changed(self, ref_id: int) -> None:
-        """Änderung ignorieren: nicht mehr melden, bis sich die Datei in ILIAS erneut ändert."""
-        raise NotImplementedError
-
-    # Status
-    def last_run(self) -> SyncRun | None:
-        raise NotImplementedError
-
-    def recent_files(self, limit: int = 50) -> list[DownloadedFile]:
-        raise NotImplementedError
-
-    def removed_items(self) -> list[DownloadedFile]:
-        raise NotImplementedError
-
-    def changed_items(self) -> list[ChangedFile]:
-        raise NotImplementedError
-
-    # Pfade
-    def root_dir(self) -> Path | None:
-        raise NotImplementedError
-
-    def log_dir(self) -> Path:
-        raise NotImplementedError
-
-    def log_file(self) -> Path:
-        raise NotImplementedError
-
-    # Autostart
-    def autostart_enabled(self) -> bool:
-        raise NotImplementedError
-
-    def set_autostart(self, enabled: bool) -> None:
-        raise NotImplementedError
+    Erst beim Zugriff geladen, weil backend.py alle Backend Module importiert und
+    diese wiederum die Datentypen von hier brauchen (sonst Importschleife)."""
+    if name == "Api":
+        from .backend import Api
+        return Api
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
