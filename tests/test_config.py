@@ -186,3 +186,11 @@ def test_cli_config_dir_sets_home(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "cmd_status", lambda: 0)
     assert cli.main(["--config-dir", str(tmp_path / "h"), "--status"]) == 0
     assert config.config_file() == (tmp_path / "h").resolve() / "config" / "config.toml"
+
+
+def test_default_interval_is_one_day(tmp_path):
+    assert Config(base_dir=None).sync_interval_minutes == 1440
+    path = tmp_path / "config.toml"
+    path.write_text('[general]\nusername = "nutzer1"\n', encoding="utf-8")
+    assert config.load_config(path).sync_interval_minutes == 1440
+    config.validate(Config(base_dir=None))

@@ -283,7 +283,7 @@ Ab Semester 2 pflegt der Nutzer die Struktur selbst über die Config bzw. GUI. R
 [general]
 base_dir = "~/Documents/Uni"                  # einmalig im Setup Wizard eingegeben
 root_folder_name = "01_Universität_Mannheim"  # wird unter base_dir angelegt
-sync_interval_minutes = 60
+sync_interval_minutes = 1440                  # Standard: einmal am Tag
 max_parallel = 3
 semester_pattern = '\((HWS|FSS) (\d{4})\)'
 autostart = false

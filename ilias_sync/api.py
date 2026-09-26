@@ -74,7 +74,7 @@ class CourseConfig:
 class Config:
     base_dir: Path | None
     root_folder_name: str = "01_Universität_Mannheim"
-    sync_interval_minutes: int = 60
+    sync_interval_minutes: int = 1440  # Standard: einmal am Tag (Entscheidung des Nutzers 2026-09-26)
     max_parallel: int = 3             # 1 bis 5
     semester_pattern: str = r"\((HWS|FSS) (\d{4})\)"
     semesters: dict[str, str] = field(default_factory=dict)   # "HWS 2026" -> "01_SEMESTER"

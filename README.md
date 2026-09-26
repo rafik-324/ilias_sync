@@ -180,7 +180,7 @@ Die Config wird von der App angelegt und gepflegt, lässt sich aber auch von Han
 [general]
 base_dir = "~/Documents/Uni"
 root_folder_name = "01_Universität_Mannheim"
-sync_interval_minutes = 60
+sync_interval_minutes = 1440   # Standard: einmal am Tag
 max_parallel = 3                              # 1 bis 5
 semester_pattern = '\((HWS|FSS) (\d{4})\)'
 autostart = false
