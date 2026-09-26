@@ -335,6 +335,7 @@ Config liegt im Config Verzeichnis von `platformdirs`, wird beim Start validiert
 
 ## Plattformdetails (platform_utils.py)
 
+* **Namen nach Linux Standard** (Entscheidung des Nutzers 2026-09-26, `linux_name`): alles, was das Tool neu anlegt (Dateien, ILIAS Ordner, Kategorie, Kurs, Video und Semesterordner), nur aus Kleinbuchstaben, Ziffern, `_`, `-` und `.`. Leerzeichen und Sonderzeichen werden zu `_`, Umlaute zu ae/oe/ue/ss. Beispiel `Ü1_MfN_Übungsskript_Kernlösung.pdf` -> `ue1_mfn_uebungsskript_kernloesung.pdf`, neue Kategorien `01_vorlesung`, `02_uebung`. Gilt nur für die Zukunft: vorhandene Dateien und Ordner werden nie umbenannt, vorhandene Ordner mit alter Schreibweise (`02_Übung`, `_Ohne_Semester`) werden per Normalisierung wiedergefunden und weiter benutzt. `root_folder_name` aus der Config bleibt wie eingestellt
 * Dateinamen bereinigen: verbotene Zeichen für Windows (`<>:"/\|?*`), reservierte Namen (`CON`, `NUL` ...), Leerzeichen/Punkte am Ende, Pfadlänge unter 250 Zeichen halten
 * Unicode: macOS liefert Dateinamen in NFD, Windows in NFC. **Alle Vergleiche in NFC**, beim Schreiben NFC verwenden
 * Link Dateien: `.url` (Windows, INI Format) bzw. `.webloc` (macOS, plist)
@@ -398,6 +399,9 @@ Sync läuft immer in einem Worker Thread (`QThread`), die GUI blockiert nie.
 * PyInstaller Spec für macOS (`.app`, `LSUIElement=true`, Icon `.icns`) und Windows (`.exe`, ohne Konsolenfenster, Icon `.ico`)
 * Eigene Icons für hellen und dunklen Modus (macOS Menüleiste: Template Image)
 * `requirements.txt` mit gepinnten Versionen
+* **macOS (Stand 2026-09-26)**: `packaging/ilias_sync_macos.spec` mit Startdatei `packaging/launcher.py` (`__main__.py` nutzt relative Importe und taugt nicht als Skript). Bauen immer nach außerhalb von OneDrive:
+  `~/.venvs/ilias-sync/bin/pyinstaller packaging/ilias_sync_macos.spec --noconfirm --distpath ~/dev/ilias_sync-build/dist --workpath ~/dev/ilias_sync-build/build`.
+  Ergebnis `ILIAS Sync.app` (etwa 104 MB, Bundle ID `de.rafik.ilias-sync`, `LSUIElement`, noch ohne eigenes Icon und unsigniert). Geprüft: startet ohne Dock Icon (`lsappinfo`: UIElement), Schlüsselbund im Bundle funktioniert, `--status` zeigt Pfade, Schlüsselbund, Session und den Autostart Befehl (zeigt auf das Programm in der `.app`). Autostart erst einschalten, wenn die App an ihrem endgültigen Ort liegt (z. B. `/Applications`), sonst zeigt der LaunchAgent ins Leere
 
 ## Meilensteine
 

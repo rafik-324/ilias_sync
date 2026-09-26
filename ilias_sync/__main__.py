@@ -111,6 +111,29 @@ def cmd_login() -> int:
     return 0
 
 
+def cmd_status() -> int:
+    """Zustand ohne Änderungen anzeigen: Pfade, Schlüsselbund, Session. Hilft bei Problemen mit der gebauten App."""
+    import keyring
+
+    from .api import Api
+
+    api = Api()
+    print("Programm:", sys.executable, "(gebaut)" if getattr(sys, "frozen", False) else "")
+    print("Config:", config.config_file())
+    print("Uni Ordner:", api.root_dir() or "noch nicht eingerichtet")
+    print("Log:", api.log_file())
+    print("Schlüsselbund:", type(keyring.get_keyring()).__module__)
+    print("Uni-ID:", api.stored_username() or "keine")
+    print("Passwort gespeichert:", "ja" if api.has_stored_password() else "nein")
+    state = api.check_session()
+    print("Session:", state.value)
+    from . import platform_utils
+
+    print("Autostart:", "an" if api.autostart_enabled() else "aus")
+    print("Autostart Befehl:", " ".join(platform_utils.autostart_command()))
+    return 0 if state.value == "ok" else 1
+
+
 def cmd_logout() -> int:
     cfg = load_config_or_report()
     if cfg is None:
@@ -470,6 +493,7 @@ def main(argv: list[str] | None = None) -> int:
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--login", action="store_true", help="Anmeldung testen, Session speichern")
     group.add_argument("--logout", action="store_true", help="Passwort und Cookies löschen")
+    group.add_argument("--status", action="store_true", help="Pfade, Schlüsselbund und Session anzeigen, ändert nichts")
     group.add_argument("--crawl", action="store_true",
                        help="Testlauf: alle Kurse, Ordner und Dateien auflisten, nichts herunterladen")
     group.add_argument("--test-sync", type=Path, metavar="ZIELORDNER",
@@ -487,7 +511,7 @@ def main(argv: list[str] | None = None) -> int:
     log_file = setup_logging(args.verbose)
     log.debug("Log Datei: %s", log_file)
 
-    if not any((args.login, args.logout, args.crawl, args.test_sync, args.dry_run, args.sync)):
+    if not any((args.login, args.logout, args.status, args.crawl, args.test_sync, args.dry_run, args.sync)):
         # Ohne Argumente: App mit Menüleisten bzw. Tray Icon starten
         from .api import Api
         from .gui.app import run
@@ -496,6 +520,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.login:
         return cmd_login()
+    if args.status:
+        return cmd_status()
     if args.crawl:
         return cmd_crawl(args.course, args.output)
     if args.test_sync:

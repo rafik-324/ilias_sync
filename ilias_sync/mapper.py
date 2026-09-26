@@ -28,16 +28,18 @@ from pathlib import Path
 
 from .api import Config, CourseConfig
 from .crawler import Course, CrawlResult, IliasObject
-from .platform_utils import nfc, sanitize_name
+from .platform_utils import linux_name, nfc
 
 log = logging.getLogger(__name__)
 
-NEW_COURSES_DIR = "_Neue_Kurse"
-VIDEO_DIR = "Videos"
+# Neue Namen folgen dem Linux Standard (platform_utils.linux_name), vorhandene Ordner
+# werden per Normalisierung wiedergefunden, auch wenn sie anders geschrieben sind
+NEW_COURSES_DIR = "_neue_kurse"
+VIDEO_DIR = "videos"
 VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".mkv", ".webm", ".avi", ".wmv"}
 # Ordnernamen, die schon Video Ordner sind (Wortteil, nach fold)
 VIDEO_FOLDER_WORDS = ("video", "aufzeichnung", "recording", "screencast")
-NO_SEMESTER_DIR = "_Ohne_Semester"
+NO_SEMESTER_DIR = "_ohne_semester"
 
 # Kategorien in Tabellenreihenfolge: (Name, Schlüsselwörter)
 CATEGORIES: list[tuple[str, list[str]]] = [
@@ -217,8 +219,7 @@ def course_dir_name(ilias_name: str, semester_pattern: str) -> str:
     # Kurz halten: Untertitel nach ":" und Modulkürzel wie "IS 201" am Anfang weglassen
     name = name.split(":", 1)[0]
     name = re.sub(r"^\s*[A-Z]{2,5}\s?\d{2,4}[a-z]?\s+", " ", name)
-    name = re.sub(r"[,;:!?()\[\]{}'\"]", " ", nfc(name)).lower()
-    name = re.sub(r"\s+", "_", sanitize_name(name).strip()).strip("._-")
+    name = linux_name(name).strip("._-")
     return name or "kurs"
 
 
@@ -253,7 +254,7 @@ def assign_semesters(semesters: list[str], configured: dict[str, str], existing_
         if free:
             result[semester] = free.pop(0)
         else:
-            result[semester] = f"{next_no:02d}_SEMESTER"
+            result[semester] = f"{next_no:02d}_semester"
             next_no += 1
     return result
 
@@ -351,10 +352,10 @@ class Mapper:
         if existing:
             name = existing[0]
         else:
-            name = sanitize_name(ilias_name)
+            name = linux_name(ilias_name)
             if is_ignored(name, self.cfg.ignore_local_dirs):
                 # Nie in einen ignorierten Ordner schreiben
-                name = f"{name} (ILIAS)"
+                name = f"{name}_ilias"
             self._plan(parent, name)
         self._resolved[cache_key] = name
         return name
@@ -376,11 +377,7 @@ class Mapper:
             siblings = self._children(course_rel)
             all_local = self.tree.subdirs(course_rel, include_ignored=True)
             numbers = [n for n in (number_prefix(d) for d in [*all_local, *siblings]) if n is not None]
-            label = category
-            numbered = [strip_number_prefix(d) for d in siblings if number_prefix(d) is not None]
-            if numbered and sum(d[:1].islower() for d in numbered) > len(numbered) / 2:
-                label = category.lower()
-            name = self._plan(course_rel, f"{max(numbers, default=0) + 1:02d}_{label}")
+            name = self._plan(course_rel, f"{max(numbers, default=0) + 1:02d}_{linux_name(category)}")
         self._resolved[cache_key] = name
         return name
 
@@ -405,7 +402,8 @@ class Mapper:
     def map_course(self, course: Course, semester_dirs: dict[str, str]) -> CourseMapping:
         semester = course_semester(course)
         if semester is None:
-            return CourseMapping(course, None, NO_SEMESTER_DIR, sanitize_name(course.name), False, "ohne Semester")
+            top = self.resolve_folder((), NO_SEMESTER_DIR)
+            return CourseMapping(course, None, top, self.resolve_folder((top,), course.name), False, "ohne Semester")
         semester_dir = semester_dirs[semester]
         configured = self.config_courses.get(course.ref_id)
         if configured and configured.local_dir:
@@ -416,8 +414,9 @@ class Mapper:
                                    self.cfg.semester_pattern)
         if match:
             return CourseMapping(course, semester, semester_dir, match, True, "fuzzy")
-        return CourseMapping(course, semester, semester_dir, f"{NEW_COURSES_DIR}/{sanitize_name(course.name)}",
-                             False, "neu")
+        new_dir = self.resolve_folder((semester_dir,), NEW_COURSES_DIR)
+        course_dir = self.resolve_folder((semester_dir, new_dir), course.name)
+        return CourseMapping(course, semester, semester_dir, f"{new_dir}/{course_dir}", False, "neu")
 
     def semester_dirs(self, result: CrawlResult) -> dict[str, str]:
         found = {s for c in result.courses if (s := course_semester(c))}
@@ -549,7 +548,7 @@ class Mapper:
             rel = note(rel, self.resolve_folder(rel, name))
         if obj.type == "file" and is_video_name(obj.name) and not any(is_video_folder(n) for n in rest):
             rel = note(rel, self.resolve_video_dir(rel))
-        return MappedItem(obj, course, (*rel, sanitize_name(obj.name)), category, cm.exists, new_dirs)
+        return MappedItem(obj, course, (*rel, linux_name(obj.name)), category, cm.exists, new_dirs)
 
     def _rule_target(self, course: Course, obj: IliasObject, ancestors: list[IliasObject]) -> str | None:
         """Config Regeln des Kurses, erste passende gewinnt."""

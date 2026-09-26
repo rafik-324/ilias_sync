@@ -86,3 +86,50 @@ def test_other_systems(monkeypatch):
     assert not pu.autostart_enabled()
     with pytest.raises(OSError):
         pu.set_autostart(True)
+
+
+@pytest.mark.parametrize("name, expected", [
+    ("Ü1_MfN_Übungsskript_Kernlösung.pdf", "ue1_mfn_uebungsskript_kernloesung.pdf"),
+    ("Linux: Folien und Übung", "linux_folien_und_uebung"),
+    ("Vorlesungsskript (1).PDF", "vorlesungsskript_1.pdf"),
+    ("Café Übersicht – Teil 2.pptx", "cafe_uebersicht_teil_2.pptx"),
+    ("Große Übung", "grosse_uebung"),
+    ("_Ohne_Semester", "_ohne_semester"),
+    (".emacs", "emacs"),
+    ("-rf", "rf"),
+    ("CON.txt", "_con.txt"),
+    ("???", "_"),
+])
+def test_linux_name(name, expected):
+    assert pu.linux_name(name) == expected
+
+
+def test_linux_name_only_allowed_characters():
+    import re
+
+    for name in ("Ä Ö Ü ä ö ü ß", "a\tb\nc", "日本語.pdf", "x/y\\z:*?\"<>|", "  spaces  .txt  "):
+        assert re.fullmatch(r"[a-z0-9._-]+", pu.linux_name(name)), name
+
+
+def test_new_file_goes_into_existing_folder_with_old_spelling(tmp_path):
+    """Nur künftige Namen ändern sich: vorhandene Ordner mit alter Schreibweise werden weiter benutzt."""
+    from ilias_sync import mapper
+    from ilias_sync.api import Config
+    from ilias_sync.crawler import Course, CrawlResult, IliasObject
+
+    root = tmp_path
+    (root / "01_SEMESTER/01_marketing/02_Übung/Zusatzmaterialien Case Study").mkdir(parents=True)
+    (root / "_Ohne_Semester/License Information (Student University of Mannheim)").mkdir(parents=True)
+    mk = Course("crs", 1, "Marketing [V] (HWS 2026)", "u1", "HWS 2026", "HWS 2026")
+    lic = Course("crs", 2, "License Information (Student University of Mannheim)", "u2", None, "MSDNAA")
+    objs = {
+        1: [IliasObject("fold", 10, "Übung", "u10", path=[mk.name]),
+            IliasObject("fold", 11, "Zusatzmaterialien Case Study", "u11", path=[mk.name, "Übung"]),
+            IliasObject("file", 12, "Neuer Case Ü3.pdf", "u12", path=[mk.name, "Übung", "Zusatzmaterialien Case Study"])],
+        2: [IliasObject("file", 20, "Neue Anleitung.pdf", "u20", path=[lic.name])],
+    }
+    result = mapper.Mapper(Config(base_dir=None), root).map_crawl(CrawlResult([mk, lic], objs))
+    got = {it.obj.ref_id: "/".join(it.rel_path) for it in result.items}
+    assert got[12] == "01_SEMESTER/01_marketing/02_Übung/Zusatzmaterialien Case Study/neuer_case_ue3.pdf"
+    assert got[20] == "_Ohne_Semester/License Information (Student University of Mannheim)/neue_anleitung.pdf"
+    assert all(not it.new_dirs for it in result.items)

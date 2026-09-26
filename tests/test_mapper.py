@@ -112,7 +112,7 @@ def test_swapped_number_finds_existing_folder(root):
     assert paths == {
         "Tutorien / Tutorium 01 / a.pdf": "01_SEMESTER/03_programmier_praktikum_1/03_Tutorium/01_tutorium/a.pdf",
         # 02_tutorium gibt es im Test Aufbau nicht: neuer Ordner mit ILIAS Namen
-        "Tutorien / Tutorium 02 / b.pdf": "01_SEMESTER/03_programmier_praktikum_1/03_Tutorium/Tutorium 02/b.pdf",
+        "Tutorien / Tutorium 02 / b.pdf": "01_SEMESTER/03_programmier_praktikum_1/03_Tutorium/tutorium_02/b.pdf",
     }
 
 
@@ -188,11 +188,11 @@ def test_best_course_dir(ilias, expected):
 def test_assign_semesters_chronologically():
     assert mapper.assign_semesters(["FSS 2027", "HWS 2026"], {}, ["01_SEMESTER"]) == {
         "HWS 2026": "01_SEMESTER",
-        "FSS 2027": "02_SEMESTER",
+        "FSS 2027": "02_semester",
     }
     assert mapper.assign_semesters(["FSS 2027"], {"HWS 2026": "01_SEMESTER"}, ["01_SEMESTER"]) == {
         "HWS 2026": "01_SEMESTER",
-        "FSS 2027": "02_SEMESTER",
+        "FSS 2027": "02_semester",
     }
 
 
@@ -212,11 +212,11 @@ def test_lecture_course_with_dateien_folder(root):
         ("file", "Dateien / Vorlesung / Folien.pdf", 10),
     ])
     assert paths == {
-        "Dateien / Tutorium / Skript.pdf": "01_SEMESTER/01_marketing/03_Tutorium/Skript.pdf",
+        "Dateien / Tutorium / Skript.pdf": "01_SEMESTER/01_marketing/03_Tutorium/skript.pdf",
         "Dateien / Übung / Zusatzmaterialien Case Study / Case.pdf":
-            "01_SEMESTER/01_marketing/02_Übung/Zusatzmaterialien Case Study/Case.pdf",
-        "Dateien / Übung / Ü1.pdf": "01_SEMESTER/01_marketing/02_Übung/Ü1.pdf",
-        "Dateien / Vorlesung / Folien.pdf": "01_SEMESTER/01_marketing/01_Vorlesung/Folien.pdf",
+            "01_SEMESTER/01_marketing/02_Übung/zusatzmaterialien_case_study/case.pdf",
+        "Dateien / Übung / Ü1.pdf": "01_SEMESTER/01_marketing/02_Übung/ue1.pdf",
+        "Dateien / Vorlesung / Folien.pdf": "01_SEMESTER/01_marketing/01_Vorlesung/folien.pdf",
     }
 
 
@@ -227,7 +227,7 @@ def test_exercise_course_without_keyword_uses_suffix(root):
         ("fold", "Dateien / W01", 3),
         ("file", "Dateien / W01 / Blatt.pdf", 4),
     ])
-    assert paths == {"Dateien / W01 / Blatt.pdf": "01_SEMESTER/02_praktische_informatik_I/02_Übung/W01/Blatt.pdf"}
+    assert paths == {"Dateien / W01 / Blatt.pdf": "01_SEMESTER/02_praktische_informatik_I/02_Übung/w01/blatt.pdf"}
 
 
 def test_tutorial_inside_exercise_course_goes_to_tutorium(root):
@@ -241,8 +241,8 @@ def test_tutorial_inside_exercise_course_goes_to_tutorium(root):
         ("file", "Tutorien / Tutorium 01 / Tut.pdf", 7),
     ])
     assert paths == {
-        "Große Übung / Übung 01 / Uebung_1.pdf": "01_SEMESTER/03_programmier_praktikum_1/02_Übung/Übung 01/Uebung_1.pdf",
-        "Tutorien / Tutorium 01 / Tut.pdf": "01_SEMESTER/03_programmier_praktikum_1/03_Tutorium/01_tutorium/Tut.pdf",
+        "Große Übung / Übung 01 / Uebung_1.pdf": "01_SEMESTER/03_programmier_praktikum_1/02_Übung/uebung_01/uebung_1.pdf",
+        "Tutorien / Tutorium 01 / Tut.pdf": "01_SEMESTER/03_programmier_praktikum_1/03_Tutorium/01_tutorium/tut.pdf",
     }
 
 
@@ -254,8 +254,8 @@ def test_existing_lowercase_category_and_subfolder_reused(root):
         ("file", "V1.pdf", 4),
     ])
     assert paths == {
-        "Tutorium / T1.pdf": "01_SEMESTER/04_wirtschaftsinformatik_1/02_tutorium/T1.pdf",
-        "V1.pdf": "01_SEMESTER/04_wirtschaftsinformatik_1/01_vorlesung/V1.pdf",
+        "Tutorium / T1.pdf": "01_SEMESTER/04_wirtschaftsinformatik_1/02_tutorium/t1.pdf",
+        "V1.pdf": "01_SEMESTER/04_wirtschaftsinformatik_1/01_vorlesung/v1.pdf",
     }
 
 
@@ -269,10 +269,10 @@ def test_existing_deeper_folder_found_despite_other_number(root):
         ("file", "Vorlesung / 07 Objektorientierte Programmierung: Einführung / O.pdf", 6),
     ])
     assert paths["Vorlesung / 00 Einführung / E.pdf"] == \
-        "01_SEMESTER/02_praktische_informatik_I/01_Vorlesung/01 Einführung/E.pdf"
+        "01_SEMESTER/02_praktische_informatik_I/01_Vorlesung/01 Einführung/e.pdf"
     # Doppelpunkt ist unter Windows verboten
     assert paths["Vorlesung / 07 Objektorientierte Programmierung: Einführung / O.pdf"] == \
-        "01_SEMESTER/02_praktische_informatik_I/01_Vorlesung/07 Objektorientierte Programmierung_ Einführung/O.pdf"
+        "01_SEMESTER/02_praktische_informatik_I/01_Vorlesung/07_objektorientierte_programmierung_einfuehrung/o.pdf"
 
 
 def test_uebungsblaetter_folder_used_when_present(root):
@@ -285,7 +285,7 @@ def test_uebungsblaetter_folder_used_when_present(root):
     ])
     assert paths["Übungsblätter / ub01.pdf"] == "01_SEMESTER/05_formale_grundlagen/03_Übungsblätter/ub01.pdf"
     # Tutorium gibt es lokal noch nicht: nächste freie Nummer, Schreibweise wie die Mehrheit
-    assert paths["Tutorien / t1.pdf"] == "01_SEMESTER/05_formale_grundlagen/04_Tutorium/t1.pdf"
+    assert paths["Tutorien / t1.pdf"] == "01_SEMESTER/05_formale_grundlagen/04_tutorium/t1.pdf"
 
 
 def test_uebungsblaetter_falls_back_to_uebung(root):
@@ -298,7 +298,7 @@ def test_new_category_number_skips_ignored_folder_numbers(root):
     c = crs(1, "Praktische Informatik I [V] (HWS 2026)")
     paths = map_one(root, c, [("fold", "Abgaben", 2), ("file", "Abgaben / a.zip", 3)])
     # 04_code ist ignoriert, belegt aber die Nummer 04
-    assert paths["Abgaben / a.zip"] == "01_SEMESTER/02_praktische_informatik_I/05_Abgaben/a.zip"
+    assert paths["Abgaben / a.zip"] == "01_SEMESTER/02_praktische_informatik_I/05_abgaben/a.zip"
 
 
 def test_existing_partial_category_name(root):
@@ -312,10 +312,10 @@ def test_never_maps_into_ignored_folder(root):
     c = crs(1, "Programmierpraktikum I [V] (HWS 2026)")
     paths = map_one(root, c, [("fold", "linux_data", 2), ("file", "linux_data / x.txt", 3)])
     assert paths["linux_data / x.txt"] == \
-        "01_SEMESTER/03_programmier_praktikum_1/01_Vorlesung/linux_data (ILIAS)/x.txt"
+        "01_SEMESTER/03_programmier_praktikum_1/01_Vorlesung/linux_data_ilias/x.txt"
     c2 = crs(2, "Programmierpraktikum I (HWS 2026)")
     paths = map_one(root, c2, [("fold", "linux_data", 2), ("file", "linux_data / x.txt", 3)])
-    assert paths["linux_data / x.txt"] == "01_SEMESTER/03_programmier_praktikum_1/linux_data (ILIAS)/x.txt"
+    assert paths["linux_data / x.txt"] == "01_SEMESTER/03_programmier_praktikum_1/linux_data_ilias/x.txt"
 
 
 def test_group_with_tut_keyword(root):
@@ -334,13 +334,13 @@ def test_group_with_tut_keyword(root):
 def test_unknown_course_goes_to_new_courses(root):
     c = crs(1, "Statistik I (HWS 2026)")
     paths = map_one(root, c, [("fold", "Vorlesung", 2), ("file", "Vorlesung / s.pdf", 3)])
-    assert paths == {"Vorlesung / s.pdf": "01_SEMESTER/_Neue_Kurse/Statistik I (HWS 2026)/Vorlesung/s.pdf"}
+    assert paths == {"Vorlesung / s.pdf": "01_SEMESTER/_neue_kurse/statistik_i_hws_2026/vorlesung/s.pdf"}
 
 
 def test_course_without_semester(root):
     c = crs(1, "License Information", heading="MSDNAA")
     paths = map_one(root, c, [("file", "Matlab.pdf", 2)])
-    assert paths == {"Matlab.pdf": "_Ohne_Semester/License Information/Matlab.pdf"}
+    assert paths == {"Matlab.pdf": "_ohne_semester/license_information/matlab.pdf"}
 
 
 def test_config_course_and_rules_win(root):
@@ -356,7 +356,7 @@ def test_config_course_and_rules_win(root):
         ("file", "Vorlesung / folie.pdf", 4),
     ], **cfg)
     assert paths == {
-        "Vorlesung / aufgabenblatt1.pdf": "01_SEMESTER/01_marketing/99_Spezial/Vorlesung/aufgabenblatt1.pdf",
+        "Vorlesung / aufgabenblatt1.pdf": "01_SEMESTER/01_marketing/99_Spezial/vorlesung/aufgabenblatt1.pdf",
         "Vorlesung / folie.pdf": "01_SEMESTER/01_marketing/01_Vorlesung/folie.pdf",
     }
 
@@ -365,7 +365,7 @@ def test_new_dirs_are_reported(root):
     c = crs(1, "Praktische Informatik I [Ü] (HWS 2026)")
     result = CrawlResult(courses=[c], objects={1: tree(c, [("fold", "W01", 2), ("file", "W01 / a.pdf", 3)])})
     (item,) = make_mapper(root).map_crawl(result).items
-    assert item.new_dirs == {("01_SEMESTER", "02_praktische_informatik_I", "02_Übung", "W01")}
+    assert item.new_dirs == {("01_SEMESTER", "02_praktische_informatik_I", "02_Übung", "w01")}
 
 
 def test_mapper_does_not_write(root):
@@ -385,7 +385,7 @@ def test_course_dir_name():
                                   PATTERN) == "wirtschaftsinformatik_i"
     assert mapper.course_dir_name("CS 560 Datenbanken I [V] (FSS 2027)", PATTERN) == "datenbanken_i"
     assert mapper.course_dir_name("Mathematik I für Wirtschaftsinformatiker [V] (HWS 2026)", PATTERN) \
-        == "mathematik_i_für_wirtschaftsinformatiker"
+        == "mathematik_i_fuer_wirtschaftsinformatiker"
     assert mapper.course_dir_name("[V] (HWS 2026)", PATTERN) == "kurs"
 
 
@@ -431,15 +431,16 @@ def test_videos_go_to_subfolder_next_to_pdfs(tmp_path):
         ("file", "01 Vom Problem zum Programm / 01 02 Algorithmen.MP4", 13),
         ("file", "Einführung.mp4", 14),
     ], courses=[CourseConfig(1, PI1_V, "02_praktische_informatik_i")], semesters={"HWS 2026": "01_SEMESTER"})
-    base = "01_SEMESTER/02_praktische_informatik_i/01_Vorlesung"
+    base = "01_SEMESTER/02_praktische_informatik_i/01_vorlesung"
     assert got == {
         "01 Vom Problem zum Programm / 01_01_VomProblemZumProgramm.pdf":
-            f"{base}/01 Vom Problem zum Programm/01_01_VomProblemZumProgramm.pdf",
+            f"{base}/01_vom_problem_zum_programm/01_01_vomproblemzumprogramm.pdf",
         "01 Vom Problem zum Programm / 01 01 VomProblemZumProgramm.mp4":
-            f"{base}/01 Vom Problem zum Programm/01_Videos/01 01 VomProblemZumProgramm.mp4",
+            f"{base}/01_vom_problem_zum_programm/01_videos/01_01_vomproblemzumprogramm.mp4",
         "01 Vom Problem zum Programm / 01 02 Algorithmen.MP4":
-            f"{base}/01 Vom Problem zum Programm/01_Videos/01 02 Algorithmen.MP4",
-        "Einführung.mp4": f"{base}/01_Videos/Einführung.mp4",
+            f"{base}/01_vom_problem_zum_programm/01_videos/01_02_algorithmen.mp4",
+        # 01_vom_problem_zum_programm belegt die 01, der Video Ordner bekommt die nächste Nummer
+        "Einführung.mp4": f"{base}/02_videos/einfuehrung.mp4",
     }
 
 
@@ -451,10 +452,10 @@ def test_video_folder_from_ilias_gets_no_extra_subfolder(tmp_path):
         ("fold", "Vorlesungsaufzeichnungen", 20),
         ("file", "Vorlesungsaufzeichnungen / woche2.mp4", 21),
     ], courses=[CourseConfig(1, PI1_V, "02_praktische_informatik_i")], semesters={"HWS 2026": "01_SEMESTER"})
-    base = "01_SEMESTER/02_praktische_informatik_i/01_Vorlesung"
-    assert got["Aufzeichnungen 2026 / woche1.mp4"] == f"{base}/Aufzeichnungen 2026/woche1.mp4"
+    base = "01_SEMESTER/02_praktische_informatik_i/01_vorlesung"
+    assert got["Aufzeichnungen 2026 / woche1.mp4"] == f"{base}/aufzeichnungen_2026/woche1.mp4"
     # Reiner Kategoriename verschwindet im Pfad, dann doch eigener Video Ordner
-    assert got["Vorlesungsaufzeichnungen / woche2.mp4"] == f"{base}/01_Videos/woche2.mp4"
+    assert got["Vorlesungsaufzeichnungen / woche2.mp4"] == f"{base}/01_videos/woche2.mp4"
 
 
 def test_existing_local_video_folder_is_reused(tmp_path):
@@ -467,7 +468,7 @@ def test_existing_local_video_folder_is_reused(tmp_path):
     (tmp_path / "01_SEMESTER/02_pi/01_Vorlesung/03_videos").rmdir()
     got = map_one(tmp_path, course, [("file", "a.mp4", 11)],
                   courses=[CourseConfig(1, PI1_V, "02_pi")], semesters={"HWS 2026": "01_SEMESTER"})
-    assert got["a.mp4"] == "01_SEMESTER/02_pi/01_Vorlesung/05_Videos/a.mp4"
+    assert got["a.mp4"] == "01_SEMESTER/02_pi/01_Vorlesung/05_videos/a.mp4"
 
 
 def test_new_category_folders_in_fixed_order(tmp_path):
@@ -481,9 +482,9 @@ def test_new_category_folders_in_fixed_order(tmp_path):
         ("file", "v.pdf", 30),
     ], courses=[CourseConfig(1, mk.name, "01_marketing")], semesters={"HWS 2026": "01_SEMESTER"})
     assert got == {
-        "Tutorium / t.pdf": "01_SEMESTER/01_marketing/03_Tutorium/t.pdf",
-        "Übung / u.pdf": "01_SEMESTER/01_marketing/02_Übung/u.pdf",
-        "v.pdf": "01_SEMESTER/01_marketing/01_Vorlesung/v.pdf",
+        "Tutorium / t.pdf": "01_SEMESTER/01_marketing/03_tutorium/t.pdf",
+        "Übung / u.pdf": "01_SEMESTER/01_marketing/02_uebung/u.pdf",
+        "v.pdf": "01_SEMESTER/01_marketing/01_vorlesung/v.pdf",
     }
 
 
@@ -495,7 +496,7 @@ def test_category_order_across_courses_in_same_folder(tmp_path):
     cfg = dict(courses=[CourseConfig(1, t.name, "02_pi"), CourseConfig(2, v.name, "02_pi")],
                semesters={"HWS 2026": "01_SEMESTER"})
     got = sorted("/".join(it.rel_path) for it in make_mapper(tmp_path, **cfg).map_crawl(result).items)
-    assert got == ["01_SEMESTER/02_pi/01_Vorlesung/v.pdf", "01_SEMESTER/02_pi/02_Tutorium/t.pdf"]
+    assert got == ["01_SEMESTER/02_pi/01_vorlesung/v.pdf", "01_SEMESTER/02_pi/02_tutorium/t.pdf"]
 
 
 def test_sheets_fall_back_to_exercise_before_tutorial(tmp_path):
@@ -507,6 +508,6 @@ def test_sheets_fall_back_to_exercise_before_tutorial(tmp_path):
         ("file", "Übungsblätter / ub01.pdf", 21),
     ], courses=[CourseConfig(1, fg.name, "02_fg")], semesters={"HWS 2026": "01_SEMESTER"})
     assert got == {
-        "Tutorium / t.pdf": "01_SEMESTER/02_fg/02_Tutorium/t.pdf",
-        "Übungsblätter / ub01.pdf": "01_SEMESTER/02_fg/01_Übung/ub01.pdf",
+        "Tutorium / t.pdf": "01_SEMESTER/02_fg/02_tutorium/t.pdf",
+        "Übungsblätter / ub01.pdf": "01_SEMESTER/02_fg/01_uebung/ub01.pdf",
     }
