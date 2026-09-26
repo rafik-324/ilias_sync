@@ -1,4 +1,4 @@
-"""Einstieg für den CLI Modus: python -m ilias_sync --login"""
+"""Einstieg: python -m ilias_sync startet die App, mit Optionen den CLI Modus (--login, --sync ...)."""
 
 from __future__ import annotations
 
@@ -467,7 +467,7 @@ def cmd_sync(dry_run: bool, output: Path | None) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ilias_sync", description="ILIAS Sync (Uni Mannheim)")
-    group = parser.add_mutually_exclusive_group(required=True)
+    group = parser.add_mutually_exclusive_group()
     group.add_argument("--login", action="store_true", help="Anmeldung testen, Session speichern")
     group.add_argument("--logout", action="store_true", help="Passwort und Cookies löschen")
     group.add_argument("--crawl", action="store_true",
@@ -486,6 +486,13 @@ def main(argv: list[str] | None = None) -> int:
 
     log_file = setup_logging(args.verbose)
     log.debug("Log Datei: %s", log_file)
+
+    if not any((args.login, args.logout, args.crawl, args.test_sync, args.dry_run, args.sync)):
+        # Ohne Argumente: App mit Menüleisten bzw. Tray Icon starten
+        from .api import Api
+        from .gui.app import run
+
+        return run(Api())
 
     if args.login:
         return cmd_login()

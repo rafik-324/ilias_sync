@@ -396,7 +396,7 @@ def run(api: Api) -> int:
     """Startet die GUI und gibt den Exit Code zurück."""
 ```
 
-`__main__.py` (gehört nicht dem GUI Agenten) ruft ohne Argumente `gui.app.run(Api())` auf. Zum Entwickeln startet `python -m ilias_sync.gui.app --fake` die GUI mit `FakeBackend`.
+`__main__.py` (gehört nicht dem GUI Agenten) ruft ohne Argumente `gui.app.run(Api())` auf, `Api` ist seit 2026-09-26 das echte Backend (`backend.py`, Log Datei `ilias-sync.log`). Zum Entwickeln startet `python -m ilias_sync.gui.app --fake` die GUI mit `FakeBackend`.
 
 ## 11. Fake Backend (`fake_backend.py`)
 
