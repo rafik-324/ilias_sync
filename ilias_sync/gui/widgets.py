@@ -44,6 +44,7 @@ def action_color(kind: ActionKind) -> str:
         ActionKind.SKIP_IGNORED: t.faint,
         ActionKind.CREATE_DIR: t.muted,
         ActionKind.UNASSIGNED: t.warning,
+        ActionKind.SKIP_TOO_LONG: t.danger,
     }[kind]
 
 
@@ -219,6 +220,9 @@ class PreviewTree(QWidget):
         self.only_changes.toggled.connect(self._rebuild)
         self.summary = role_label("", "section")
         self.summary.setWordWrap(True)
+        # gut sichtbar: Dateien, die wegen zu langer Pfade nicht geladen würden
+        self.too_long = error_label()
+        self.too_long.setWordWrap(True)
 
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["Name", "Aktion", "Größe"])
@@ -244,6 +248,7 @@ class PreviewTree(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(10)
         lay.addLayout(top)
+        lay.addWidget(self.too_long)
         lay.addWidget(card, 1)
         lay.addWidget(self.legend)
 
@@ -256,13 +261,16 @@ class PreviewTree(QWidget):
     def set_actions(self, actions: list[PlannedAction], root: Path | None) -> None:
         self.actions = actions
         self.root = root
-        self.summary.setText(logic.summarize(actions).text() if actions else "Keine Änderungen, alles aktuell.")
+        summary = logic.summarize(actions)
+        self.summary.setText(summary.text() if actions else "Keine Änderungen, alles aktuell.")
+        show_error(self.too_long, logic.too_long_text(summary.too_long))
         self._rebuild()
 
     def clear(self) -> None:
         self.actions = []
         self.tree.clear()
         self.summary.setText("")
+        show_error(self.too_long, None)
 
     def _rebuild(self) -> None:
         self.tree.clear()

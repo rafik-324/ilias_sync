@@ -180,6 +180,7 @@ ACTION_LABELS: dict[ActionKind, str] = {
     ActionKind.SKIP_IGNORED: "Übersprungen (ignoriert)",
     ActionKind.CREATE_DIR: "Neuer Ordner",
     ActionKind.UNASSIGNED: "Nicht zugeordnet",
+    ActionKind.SKIP_TOO_LONG: "Pfad zu lang",
 }
 
 ACTION_HINTS: dict[ActionKind, str] = {
@@ -191,7 +192,18 @@ ACTION_HINTS: dict[ActionKind, str] = {
     ActionKind.SKIP_IGNORED: "Liegt in einem ignorierten Ordner",
     ActionKind.CREATE_DIR: "Ordner wird angelegt",
     ActionKind.UNASSIGNED: "Kurs ist noch keinem Ordner zugeordnet, Ablage unter _neue_kurse",
+    ActionKind.SKIP_TOO_LONG: "Zielpfad zu lang, wird nicht geladen. Ein kürzerer Basisordner hilft",
 }
+
+TOO_LONG_HINT = ("Ein kürzerer Basisordner hilft, zum Beispiel direkt im Benutzerordner "
+                 "(Einstellungen, Basisordner).")
+
+
+def too_long_text(n: int) -> str | None:
+    """Warnung für Vorschau und Wizard, None wenn alle Pfade passen."""
+    if not n:
+        return None
+    return f"{_plural(n, 'Datei', 'Dateien')} nicht ablegbar (Pfad zu lang). {TOO_LONG_HINT}"
 
 SKIP_KINDS = {ActionKind.SKIP_REMOVED, ActionKind.SKIP_IGNORED}
 
@@ -253,6 +265,7 @@ class PreviewSummary:
     skipped: int = 0
     unassigned: int = 0
     new_dirs: int = 0
+    too_long: int = 0
 
     def text(self) -> str:
         parts = []
@@ -270,6 +283,8 @@ class PreviewSummary:
             parts.append(f"{self.unassigned} nicht zugeordnet")
         if self.new_dirs:
             parts.append(_plural(self.new_dirs, "neuer Ordner", "neue Ordner"))
+        if self.too_long:
+            parts.append(f"{self.too_long} nicht ablegbar (Pfad zu lang)")
         if self.skipped:
             parts.append(f"{self.skipped} übersprungen")
         return ", ".join(parts)
@@ -293,6 +308,8 @@ def summarize(actions: list[PlannedAction]) -> PreviewSummary:
             s.unassigned += 1
         elif a.kind == ActionKind.CREATE_DIR:
             s.new_dirs += 1
+        elif a.kind == ActionKind.SKIP_TOO_LONG:
+            s.too_long += 1
     return s
 
 

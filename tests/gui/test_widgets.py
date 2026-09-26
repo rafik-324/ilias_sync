@@ -90,7 +90,7 @@ def test_hauptfenster_tabs(qtbot, fake):
     qtbot.addWidget(w)
     w.show_tab("courses")
     assert w.current_page() is w.courses
-    assert w.courses.table.rowCount() == 6
+    assert w.courses.table.rowCount() == 7
     w.show_tab("log")
     assert w.current_page() is w.log
     # Übersicht zeigt die Beispieldaten
@@ -128,7 +128,7 @@ def test_nicht_zugeordneter_kurs_nach_sync(qtbot, fake):
     qtbot.addWidget(w)
     with qtbot.waitSignal(c.sync_finished, timeout=10_000):
         c.start_sync()
-    assert w.courses.table.rowCount() == 7
+    assert w.courses.table.rowCount() == 8
     assert "neu" in w.nav.item(1).text()
 
 
@@ -384,12 +384,36 @@ def test_kurse_ordner_dropdowns_ohne_mausrad(qtbot, fake):
 
 
 def test_semester_spalte_nur_bei_mehreren_semestern(qtbot, fake):
-    from ilias_sync.gui.tab_courses import COL_SEM
+    from ilias_sync.gui.tab_courses import COL_NAME, COL_SEM
+    # ohne den Lizenzkurs gibt es nur HWS 2025: Spalte ausgeblendet, Semester im Tooltip
+    cfg = fake.load_config()
+    cfg.courses = [c for c in cfg.courses if c.ref_id != 1008]
+    fake.save_config(cfg)
     w = MainWindow(Controller(fake))
     qtbot.addWidget(w)
-    # Fake Config: nur HWS 2025
     assert w.courses.table.isColumnHidden(COL_SEM)
-    assert "Semester HWS 2025" in w.courses.table.item(0, 0).toolTip()
+    assert "Semester HWS 2025" in w.courses.table.item(0, COL_NAME).toolTip()
+
+
+def test_kurs_ohne_semester_auf_seite_kurse(qtbot, fake):
+    from PySide6.QtWidgets import QComboBox
+    from ilias_sync.gui.tab_courses import COL_DIR, COL_NAME, COL_SEM, COL_TYPES
+    w = MainWindow(Controller(fake))
+    qtbot.addWidget(w)
+    t = w.courses.table
+    row = next(r for r in range(t.rowCount()) if "License" in t.item(r, COL_NAME).text())
+    assert not t.isColumnHidden(COL_SEM)            # zwei "Semester": HWS 2025 und ohne
+    assert t.item(row, COL_SEM).text() == "ohne Semester"
+    assert "Ohne Semester" in t.item(row, COL_NAME).toolTip()
+    combo = t.cellWidget(row, COL_DIR).findChild(QComboBox)
+    assert combo.currentText() == "license_information_student_university_of_mannheim"
+    # Schalter bedienbar: Videos aus, dann speichern
+    btn = t.cellWidget(row, COL_TYPES).findChildren(QPushButton)[0]
+    assert btn.course.ref_id == 1008
+    btn._changed("download_videos", False)
+    assert w.courses.btn_save.isEnabled()
+    assert w.courses.save()
+    assert not next(c for c in fake.load_config().courses if c.ref_id == 1008).download_videos
 
 
 # ---------------- Abnahme: Wizard, Beenden, zweiter Start ----------------
@@ -430,7 +454,7 @@ def test_wizard_kompletter_durchlauf_mit_fehlerfaellen(qtbot, fake_first_run, mo
     api.fail.discard("offline")
     page.retry.click()
     qtbot.waitUntil(page.isComplete, timeout=10_000)
-    assert page.table.rowCount() == 7
+    assert page.table.rowCount() == 8
     wiz.next()
 
     # 4. Vorschau
@@ -521,3 +545,27 @@ def test_einzelinstanz_und_settings_je_testumgebung(monkeypatch, tmp_path):
     monkeypatch.setenv("ILIAS_SYNC_HOME", str(tmp_path / "b"))
     assert gui_app._server_name() not in (a, normal)
     assert len(gui_app.instance_suffix()) == 8
+
+
+
+# ---------------- Pfad zu lang ----------------
+
+def test_vorschau_warnt_bei_zu_langen_pfaden(qtbot, fake):
+    c = Controller(fake)
+    w = MainWindow(c)
+    qtbot.addWidget(w)
+    with qtbot.waitSignal(c.dry_run_finished, timeout=10_000):
+        w.preview.btn_preview.click()
+    tree = w.preview.tree
+    assert not tree.too_long.isHidden()
+    assert tree.too_long.text().startswith("1 Datei nicht ablegbar (Pfad zu lang).")
+    assert "kürzerer Basisordner" in tree.too_long.text()
+    assert "1 nicht ablegbar (Pfad zu lang)" in tree.summary.text()
+    assert "Pfad zu lang" in tree.legend.text()
+
+
+def test_sync_zaehlt_zu_lange_pfade_als_fehler(qtbot, fake):
+    import threading
+    result = fake.sync(lambda p: None, threading.Event())
+    too_long = [e for e in result.errors if e.startswith("Pfad zu lang (")]
+    assert len(too_long) == 1 and result.run.errors == len(result.errors)

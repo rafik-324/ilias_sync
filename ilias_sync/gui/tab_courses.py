@@ -219,10 +219,11 @@ class CoursesTab(Page):
         for row, course in enumerate(courses):
             sem = logic.semester_of(course.ilias_name, self._pattern())
             name_item = QTableWidgetItem(logic.course_display_name(course.ilias_name, self._pattern()))
-            name_item.setToolTip(f"{course.ilias_name}\nSemester {sem or 'unbekannt'}\nref_id {course.ref_id}")
+            sem_text = f"Semester {sem}" if sem else "Ohne Semester"
+            name_item.setToolTip(f"{course.ilias_name}\n{sem_text}\nref_id {course.ref_id}")
             name_item.setData(Qt.ItemDataRole.UserRole, course.ref_id)
             self.table.setItem(row, COL_NAME, name_item)
-            self.table.setItem(row, COL_SEM, QTableWidgetItem(sem or "unbekannt"))
+            self.table.setItem(row, COL_SEM, QTableWidgetItem(sem or "ohne Semester"))
 
             combo = self._dir_combo(course, sem)
             dir_width = max(dir_width, _combo_width(combo))

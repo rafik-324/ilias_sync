@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from ilias_sync.gui import logic
 from ilias_sync.api import (
     ActionKind,
     BaseDirCheck,
@@ -70,9 +71,17 @@ _COURSES: list[tuple[int, str, str | None, list[str]]] = [
     (1006, "Formale Grundlagen (HWS 2025)", "05_formale_grundlagen",
      ["01_Vorlesung", "02_Übung", "03_Übungsblätter"]),
     (1007, "Statistik I (FSS 2026)", None, []),
+    # Kurs ohne Semester (Lizenzkurs): Ordner unter _ohne_semester
+    (1008, "License Information (Student University of Mannheim)",
+     "license_information_student_university_of_mannheim", []),
 ]
 
 # (Kurs ref_id, ILIAS Ordner, lokale Kategorie, Dateiname, Größe)
+NO_SEMESTER_REF = 1008
+# Das Backend prüft den ganzen Pfad gegen 250 Zeichen. Die Attrappe misst ab dem Uni Ordner,
+# damit das Ergebnis nicht von der Länge des Temp Verzeichnisses abhängt
+MAX_REL_PATH = 200
+
 _FILES: list[tuple[int, str, str, str, int]] = [
     (1001, "Vorlesung", "01_Vorlesung", "Vorkurs_Folien_Tag1.pdf", 2_400_000),
     (1001, "Vorlesung", "01_Vorlesung", "Vorkurs_Folien_Tag2.pdf", 2_100_000),
@@ -96,6 +105,10 @@ _FILES: list[tuple[int, str, str, str, int]] = [
     (1006, "Übungsblätter", "03_Übungsblätter", "Übungsblatt_02.pdf", 205_000),
     (1006, "Übung", "02_Übung", "Präsenzübung_01.pdf", 160_000),
     (1007, "Vorlesung", "01_vorlesung", "Statistik_Kapitel_1.pdf", 2_900_000),
+    (1008, "Matlab", "matlab", "Matlab_Lizenz_Anleitung.pdf", 150_000),
+    # Name so lang, dass der Zielpfad über der Grenze liegt (ergibt SKIP_TOO_LONG)
+    (1003, "Vorlesung", "01_Vorlesung",
+     "Zusatzmaterial_" + "_".join(["Sehr_ausfuehrliche_Beschreibung_des_Kapitels"] * 5) + ".pdf", 1_300_000),
 ]
 
 
@@ -185,8 +198,8 @@ class FakeApi:
         if not self._inside_workdir(self._root()):
             return
         sem = self._root() / "01_SEMESTER"
-        for _, _, local, cats in _COURSES:
-            if local is None:
+        for ref, _, local, cats in _COURSES:
+            if local is None or ref == NO_SEMESTER_REF:
                 continue
             for cat in cats:
                 (sem / local / cat).mkdir(parents=True, exist_ok=True)
@@ -260,7 +273,9 @@ class FakeApi:
         items = []
         for i, (ref, folder, cat, name, size) in enumerate(_FILES):
             cfg = self._course_cfg(ref)
-            if cfg and cfg.local_dir:
+            if cfg and cfg.local_dir and ref == NO_SEMESTER_REF:
+                target = root / "_ohne_semester" / cfg.local_dir / cat / linux_name(name)
+            elif cfg and cfg.local_dir:
                 target = root / "01_SEMESTER" / cfg.local_dir / cat / linux_name(name)
             else:
                 target = (root / "02_semester" / "_neue_kurse" / linux_name(self._course_name(ref))
@@ -396,7 +411,7 @@ class FakeApi:
         for i, (ref, name, _, _) in enumerate(_COURSES):
             progress(Progress("Kurse abrufen", i, len(_COURSES), name))
             self._sleep(cancel, 2)
-            semester = name[name.rfind("(") + 1:-1] if name.endswith(")") else None
+            semester = logic.semester_of(name, r"\((HWS|FSS) (\d{4})\)")
             courses.append(IliasCourse(ref, name, semester, f"https://ilias.uni-mannheim.de/goto.php?target=crs_{ref}"))
         progress(Progress("Kurse abrufen", len(_COURSES), len(_COURSES), None))
         return courses
@@ -448,6 +463,8 @@ class FakeApi:
                 if item.ref_id not in self._changed and item.ref_id != self._pending_change():
                     continue
                 kind = ActionKind.CHANGED
+            elif len(str(item.local_path.relative_to(self._root()))) > MAX_REL_PATH:
+                kind = ActionKind.SKIP_TOO_LONG
             elif cfg is None or cfg.local_dir is None:
                 kind = ActionKind.UNASSIGNED
             else:
@@ -512,6 +529,11 @@ class FakeApi:
             cancelled = True
             log.info("Sync abgebrochen")
         progress(Progress("Herunterladen", len(todo), len(todo), None))
+        # zu lange Zielpfade werden nicht geladen und zählen als Fehler (wie im Backend)
+        for action in actions:
+            if action.kind == ActionKind.SKIP_TOO_LONG:
+                rel = action.local_path.relative_to(self._root())
+                errors.append(f"Pfad zu lang ({len(str(action.local_path))} Zeichen): {rel}")
         changed_files = []
         if not cancelled:
             for action in actions:
