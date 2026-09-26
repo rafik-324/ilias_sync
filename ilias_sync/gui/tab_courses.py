@@ -47,7 +47,8 @@ TYPE_COLUMNS: list[tuple[str, str]] = [
 ]
 COL_NAME, COL_SEM, COL_DIR, COL_TYPES, COL_RULES = range(5)
 
-STANDARD_KATEGORIEN = ["01_Vorlesung", "02_Übung", "03_Tutorium", "03_Übungsblätter", "04_Abgaben"]
+# Namen neu angelegter Kategorien (Namensregel: klein, Umlaute als ae/oe/ue/ss)
+STANDARD_KATEGORIEN = ["01_vorlesung", "02_uebung", "03_tutorium", "03_uebungsblaetter", "04_abgaben"]
 
 
 class ContentsPopup(QFrame):
@@ -249,7 +250,7 @@ class CoursesTab(Page):
             kurs = "Ein Kurs ist" if unassigned == 1 else f"{unassigned} Kurse sind"
             self.hint.setText(
                 f"{kurs} noch keinem Ordner zugeordnet. Bis zur Zuordnung wird unter "
-                "<i>Semesterordner/_Neue_Kurse</i> abgelegt."
+                "<i>Semesterordner/_neue_kurse</i> abgelegt."
             )
         self.hint.setVisible(bool(unassigned))
         self._filling = False

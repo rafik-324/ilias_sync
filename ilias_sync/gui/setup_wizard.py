@@ -181,8 +181,8 @@ class BaseDirPage(QWizardPage):
             self.structure.setText("\n".join([
                 str(path),
                 f"└── {self.root_name}/",
-                "    └── 01_SEMESTER/",
-                "        └── NN_kursname/NN_Kategorie/ ...",
+                "    └── 01_semester/",
+                "        └── NN_kursname/NN_kategorie/ ...",
             ]))
         else:
             self.structure.setText("")
@@ -257,7 +257,7 @@ class CoursesPage(QWizardPage):
         lay.addWidget(self.table, 1)
         lay.addWidget(hint_label(
             "Gelb markierte Zuordnungen sind unsicher. Neue Ordner werden erst beim Sync angelegt. "
-            "\"Nicht zugeordnet\" legt Dateien vorerst unter _Neue_Kurse ab."
+            "\"Nicht zugeordnet\" legt Dateien vorerst unter _neue_kurse ab."
         ))
 
     def initializePage(self) -> None:  # noqa: N802

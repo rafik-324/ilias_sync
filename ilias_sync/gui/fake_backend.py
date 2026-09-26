@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from ilias_sync.gui import logic
 from ilias_sync.api import (
     ActionKind,
     BaseDirCheck,
@@ -51,6 +52,10 @@ from ilias_sync.api import (
 )
 
 log = logging.getLogger("ilias_sync.fake")
+
+# Namensregel für alles, was das Tool neu anlegt. Vorhandene Ordner des Nutzers
+# (01_SEMESTER, 01_Vorlesung, 02_Übung ...) behalten ihre Schreibweise, wie in der Praxis.
+linux_name = logic.linux_name
 
 FAKE_PASSWORD_HINT = "Beim Fake Backend funktioniert jedes Passwort außer 'falsch'."
 
@@ -91,7 +96,7 @@ _FILES: list[tuple[int, str, str, str, int]] = [
     (1006, "Übungsblätter", "03_Übungsblätter", "Übungsblatt_01.pdf", 190_000),
     (1006, "Übungsblätter", "03_Übungsblätter", "Übungsblatt_02.pdf", 205_000),
     (1006, "Übung", "02_Übung", "Präsenzübung_01.pdf", 160_000),
-    (1007, "Vorlesung", "Vorlesung", "Statistik_Kapitel_1.pdf", 2_900_000),
+    (1007, "Vorlesung", "01_vorlesung", "Statistik_Kapitel_1.pdf", 2_900_000),
 ]
 
 
@@ -187,7 +192,7 @@ class FakeApi:
             for cat in cats:
                 (sem / local / cat).mkdir(parents=True, exist_ok=True)
         # Eigene Datei des Nutzers mit demselben Namen wie eine ILIAS Datei (ergibt CONFLICT)
-        own = sem / "01_marketing" / "02_Übung" / "Fallstudie_1.pdf"
+        own = sem / "01_marketing" / "02_Übung" / "fallstudie_1.pdf"
         if not own.exists():
             own.write_text("Eigene Notizen, nicht aus ILIAS.\n", encoding="utf-8")
 
@@ -257,14 +262,15 @@ class FakeApi:
         for i, (ref, folder, cat, name, size) in enumerate(_FILES):
             cfg = self._course_cfg(ref)
             if cfg and cfg.local_dir:
-                target = root / "01_SEMESTER" / cfg.local_dir / cat / name
+                target = root / "01_SEMESTER" / cfg.local_dir / cat / linux_name(name)
             else:
-                target = root / "02_SEMESTER" / "_Neue_Kurse" / self._course_name(ref) / folder / name
+                target = (root / "02_semester" / "_neue_kurse" / linux_name(self._course_name(ref))
+                          / linux_name(folder) / linux_name(name))
             items.append(_Item(ref * 1000 + i, ref, f"{self._course_name(ref)} / {folder} / {name}", target, size))
         # ab dem zweiten Sync taucht pro Sync eine neue Folie in Marketing auf
         for n in range(1, self._sync_count + 1):
             name = f"{3 + n:02d}_Neue_Folien_Woche_{3 + n}.pdf"
-            target = root / "01_SEMESTER" / "01_marketing" / "01_Vorlesung" / name
+            target = root / "01_SEMESTER" / "01_marketing" / "01_Vorlesung" / linux_name(name)
             items.append(_Item(1002_900 + n, 1002, f"Marketing (HWS 2025) / Lecture Slides / {name}", target, 4_000_000))
         return items
 
@@ -403,14 +409,14 @@ class FakeApi:
         new_counter: dict[str, int] = {}
         for course in courses:
             known = next((c for c in _COURSES if c[0] == course.ref_id), None)
-            sem_dir = "01_SEMESTER" if course.semester == "HWS 2025" else "02_SEMESTER"
+            sem_dir = "01_SEMESTER" if course.semester == "HWS 2025" else "02_semester"
             if has_existing and known and known[2]:
                 score = 0.62 if course.ref_id == 1004 else 0.93
                 result.append(MappingSuggestion(course, sem_dir, known[2], True, score))
             else:
                 n = new_counter.get(sem_dir, 0)
                 new_counter[sem_dir] = n + 1
-                name = course.name[: course.name.rfind("(")].strip().lower().replace(" ", "_")
+                name = linux_name(course.name[: course.name.rfind("(")])
                 result.append(MappingSuggestion(course, sem_dir, f"{n + 1:02d}_{name}", False, 0.0))
         return result
 
@@ -452,7 +458,7 @@ class FakeApi:
             code = self._root() / "01_SEMESTER" / "02_praktische_informatik_I" / "04_code" / "main.py"
             actions.append(PlannedAction(ActionKind.SKIP_IGNORED, 1003, self._course_name(1003),
                                          "Praktische Informatik I (HWS 2025) / Code / main.py", code, 1200))
-            new_dir = self._root() / "01_SEMESTER" / "04_wirtschaftsinformatik_1" / "03_Übung"
+            new_dir = self._root() / "01_SEMESTER" / "04_wirtschaftsinformatik_1" / "03_uebung"
             actions.append(PlannedAction(ActionKind.CREATE_DIR, 1005, self._course_name(1005),
                                          "Wirtschaftsinformatik 1 (HWS 2025) / Übung", new_dir, None))
         progress(Progress("Durchsuchen", len(items), len(items), None))

@@ -72,7 +72,7 @@ class RulesDialog(QDialog):
             "Die erste passende Regel gewinnt."
         ))
         lay.addWidget(hint_label(
-            "Beispiele: Ordner \"Lecture Slides\" nach 01_Vorlesung, Datei \"*blatt*.pdf\" nach 03_Übungsblätter. "
+            "Beispiele: Ordner \"Lecture Slides\" nach 01_vorlesung, Datei \"*blatt*.pdf\" nach 03_uebungsblaetter. "
             "* steht für beliebig viele Zeichen."
         ))
         lay.addLayout(mid, 1)

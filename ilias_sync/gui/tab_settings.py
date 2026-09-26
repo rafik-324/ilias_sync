@@ -117,7 +117,7 @@ class SettingsTab(Page):
         v_sem = QVBoxLayout(box_sem)
         v_sem.setContentsMargins(0, 8, 0, 0)
         v_sem.setSpacing(10)
-        v_sem.addWidget(hint_label("Welches Semester in welchem Ordner landet, z. B. HWS 2026 in 01_SEMESTER. "
+        v_sem.addWidget(hint_label("Welches Semester in welchem Ordner landet, z. B. HWS 2026 in 01_semester. "
                                    "Leere Einträge werden beim nächsten Sync mit der nächsten Nummer angelegt."))
         v_sem.addWidget(self.sem_table)
 

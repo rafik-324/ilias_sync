@@ -142,7 +142,7 @@ def test_suggest_course_dir(name, existing, expected):
 
 def test_suggest_course_dir_nfc():
     nfd = "Übung (HWS 2026)"  # Ü in NFD wie auf macOS
-    assert logic.suggest_course_dir(nfd, []) == "01_übung"
+    assert logic.suggest_course_dir(nfd, []) == "01_uebung"
 
 
 def _cfg(**kw) -> Config:
@@ -250,3 +250,13 @@ def test_fortschritt_text():
     assert logic.progress_text(Progress("Durchsuchen", 37, None, "ILIAS Seiten gelesen")) == \
         "Durchsuchen ... 37 ILIAS Seiten gelesen"
     assert logic.progress_text(Progress("Anmelden", 0, None, None)) == "Anmelden ..."
+
+
+@pytest.mark.parametrize("name", [
+    "02_Übung", "Ü1_MfN_Übungsskript Kernlösung.PDF", "Große Übung", "skript (1).pdf", "_Neue_Kurse",
+    ".versteckt", "-option", "Recht: Grundlagen?", "Café résumé", "a  b__c", "Straße", "IS 201 WI",
+])
+def test_linux_name_gleich_wie_backend(name):
+    # die GUI darf platform_utils nicht importieren, der Test hält beide Fassungen gleich
+    from ilias_sync.platform_utils import linux_name as backend_linux_name
+    assert logic.linux_name(name) == backend_linux_name(name)

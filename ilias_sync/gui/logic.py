@@ -190,7 +190,7 @@ ACTION_HINTS: dict[ActionKind, str] = {
     ActionKind.SKIP_REMOVED: "Von dir verschoben oder gelöscht, wird nicht erneut geladen",
     ActionKind.SKIP_IGNORED: "Liegt in einem ignorierten Ordner",
     ActionKind.CREATE_DIR: "Ordner wird angelegt",
-    ActionKind.UNASSIGNED: "Kurs ist noch keinem Ordner zugeordnet, Ablage unter _Neue_Kurse",
+    ActionKind.UNASSIGNED: "Kurs ist noch keinem Ordner zugeordnet, Ablage unter _neue_kurse",
 }
 
 SKIP_KINDS = {ActionKind.SKIP_REMOVED, ActionKind.SKIP_IGNORED}
@@ -311,11 +311,27 @@ def next_number(existing: list[str]) -> int:
     return max(numbers, default=0) + 1
 
 
+_TRANSLITERATION = (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss"))
+
+
+def linux_name(name: str) -> str:
+    """Namensregel für neu angelegte Ordner und Dateien, gleich wie platform_utils.linux_name im
+    Backend (die GUI importiert nur api.py): nur Kleinbuchstaben, Ziffern, "_", "-" und ".",
+    Umlaute als ae/oe/ue/ss. "02_Übung" -> "02_uebung". Ein Test hält beide Fassungen gleich."""
+    name = _nfc(name).lower()
+    for a, b in _TRANSLITERATION:
+        name = name.replace(a, b)
+    name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
+    name = re.sub(r"[^a-z0-9._-]+", "_", name)
+    name = re.sub(r"_{2,}", "_", name)
+    name = re.sub(r"[_-]+\.", ".", name)
+    name = re.sub(r"\.[_-]+", ".", name)
+    return name.lstrip(".-").rstrip("._-")
+
+
 def suggest_course_dir(ilias_name: str, existing: list[str], pattern: str | None = None) -> str:
-    """Vorschlag "NN_kursname": nächste freie Nummer, klein, Leerzeichen zu _."""
-    name = _nfc(course_display_name(ilias_name, pattern)).lower()
-    name = re.sub(r'[<>:"/\\|?*]', "", name)
-    name = re.sub(r"\s+", "_", name).strip("._")
+    """Vorschlag "NN_kursname" nach der Namensregel, nächste freie Nummer."""
+    name = linux_name(course_display_name(ilias_name, pattern)).strip("._-")
     return f"{next_number(existing):02d}_{name or 'kurs'}"
 
 

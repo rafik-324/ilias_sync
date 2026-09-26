@@ -174,3 +174,17 @@ def test_erster_sync_nur_in_leeren_uni_ordner(fake_first_run, tmp_path):
 
 def test_check_base_dir_leer(fake_first_run, tmp_path):
     assert fake_first_run.check_base_dir(tmp_path / "gibt_es_nicht").is_empty
+
+
+def test_fake_neue_namen_nach_namensregel(fake):
+    actions = fake.dry_run(_noop, threading.Event())
+    root = fake.root_dir()
+    for a in actions:
+        rel = a.local_path.relative_to(root)
+        if a.kind in (ActionKind.NEW, ActionKind.CONFLICT):
+            # Dateiname nach Regel, vorhandene Nutzerordner davor dürfen alte Schreibweise haben
+            assert rel.name == rel.name.lower() and "ü" not in rel.name, rel
+        if a.kind == ActionKind.UNASSIGNED:
+            assert rel.parts[:2] == ("02_semester", "_neue_kurse"), rel
+            assert all(p == p.lower() for p in rel.parts), rel
+    assert any(a.kind == ActionKind.CREATE_DIR and a.local_path.name == "03_uebung" for a in actions)
