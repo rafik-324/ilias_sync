@@ -464,13 +464,20 @@ class SetupWizard(QWizard):
         self.finish_page = FinishPage()
         self.addPage(self.finish_page)
 
-        # grössere Seitentitel im Stil des Hauptfensters
+        # macOS: Abbrechen links neben Zurück und Weiter, Hauptknopf ganz rechts
+        if sys.platform == "darwin":
+            wb = QWizard.WizardButton
+            self.setButtonLayout([wb.Stretch, wb.CancelButton, wb.BackButton, wb.NextButton,
+                                  wb.CommitButton, wb.FinishButton])
+
+        # grössere Seitentitel im Stil des Hauptfensters. Untertitel steht im selben
+        # Label, weil ModernStyle ihn sonst eingerückt unter den Titel setzt
         self.setTitleFormat(Qt.TextFormat.RichText)
-        self.setSubTitleFormat(Qt.TextFormat.RichText)
         for page_id in self.pageIds():
             page = self.page(page_id)
-            page.setTitle(f'<span style="font-size:20px; font-weight:600;">{page.title()}</span>')
-            page.setSubTitle(f'<span style="font-size:13px;">{page.subTitle()}</span>')
+            page.setTitle(f'<span style="font-size:20px; font-weight:600;">{page.title()}</span>'
+                          f'<br><span style="font-size:13px; font-weight:400;">{page.subTitle()}</span>')
+            page.setSubTitle("")
 
     def start_sync_requested(self) -> bool:
         return self.finish_page.start_now.isChecked()

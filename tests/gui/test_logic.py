@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from ilias_sync.api import ActionKind, Config, DownloadedFile, ItemStatus, PlannedAction
+from ilias_sync.api import ActionKind, ChangedFile, Config, DownloadedFile, ItemStatus, PlannedAction
 from ilias_sync.gui import logic
 from ilias_sync.gui.scheduler_gui import START_DELAY, next_due
 
@@ -210,3 +210,27 @@ def test_next_due():
 def test_contents_summary(off, expected):
     labels = ["Dateien", "Videos", "Übungen", "Weblinks", "Foren", "Sonstiges"]
     assert logic.contents_summary([(label, label not in off) for label in labels]) == expected
+
+
+def _changed(course: str) -> ChangedFile:
+    return ChangedFile(1, course, "a.pdf", Path("a.pdf"), None, None, None, datetime(2026, 9, 26))
+
+
+def test_geaendert_buendeln():
+    assert logic.bundle_changed_files([]) is None
+    assert logic.bundle_changed_files([_changed("Marketing (HWS 2026)")]) == \
+        "1 Datei in Marketing wurde in ILIAS geändert"
+    assert logic.bundle_changed_files([_changed("Marketing (HWS 2026)")] * 2) == \
+        "2 Dateien in Marketing wurden in ILIAS geändert"
+    files = [_changed("Marketing (HWS 2026)")] * 3 + [_changed("Statistik (FSS 2027)")] * 2
+    assert logic.bundle_changed_files(files) == "5 Dateien in 2 Kursen wurden in ILIAS geändert"
+
+
+def test_geaendert_menue_und_vorschau():
+    assert logic.changed_count_text(1) == "1 Datei in ILIAS geändert"
+    assert logic.changed_count_text(3) == "3 Dateien in ILIAS geändert"
+    s = logic.summarize([_action(ActionKind.CHANGED, "x"), _action(ActionKind.NEW, "y", None)])
+    assert s.changed == 1 and "1 in ILIAS geändert" in s.text()
+    assert ActionKind.CHANGED in logic.LEGEND_KINDS
+    assert ActionKind.UPDATE not in logic.LEGEND_KINDS
+    assert set(logic.ACTION_LABELS) == set(ActionKind) == set(logic.ACTION_HINTS)

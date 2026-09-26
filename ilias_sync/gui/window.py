@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QByteArray, QSettings, QSize, Qt, Signal
-from PySide6.QtGui import QCloseEvent, QGuiApplication
+from PySide6.QtGui import QCloseEvent, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -20,11 +20,13 @@ from ilias_sync import __version__
 from ilias_sync.gui import logic, theme
 from ilias_sync.gui.controller import Controller
 from ilias_sync.gui.icons import IconState, app_icon, dot, nav_icon
+from ilias_sync.gui.macos import activate_app
 from ilias_sync.gui.tab_courses import CoursesTab
 from ilias_sync.gui.tab_log import LogTab
 from ilias_sync.gui.tab_overview import OverviewTab
 from ilias_sync.gui.tab_preview import PreviewTab
 from ilias_sync.gui.tab_settings import SettingsTab
+from ilias_sync.gui.tray import ZIEL_GEAENDERT
 from ilias_sync.gui.widgets import role_label
 
 TAB_NAMES = ["overview", "courses", "preview", "settings", "log"]
@@ -33,6 +35,7 @@ NAV_LABELS = ["Übersicht", "Kurse", "Vorschau", "Einstellungen", "Log"]
 
 class MainWindow(QMainWindow):
     login_requested = Signal()
+    quit_requested = Signal()
 
     def __init__(self, controller: Controller) -> None:
         super().__init__()
@@ -60,6 +63,11 @@ class MainWindow(QMainWindow):
         lay.addWidget(self._build_sidebar())
         lay.addWidget(self.pages, 1)
         self.setCentralWidget(central)
+
+        # Cmd+W / Cmd+Q auf macOS (Strg+F4 bzw. Strg+Q anderswo). Beenden läuft über
+        # denselben Weg wie im Tray Menü, damit ein laufender Sync sauber abbricht
+        QShortcut(QKeySequence.StandardKey.Close, self, self.close)
+        QShortcut(QKeySequence.StandardKey.Quit, self, self.quit_requested.emit)
 
         self._current_index = 0
         self.nav.setCurrentRow(0)
@@ -205,7 +213,12 @@ class MainWindow(QMainWindow):
     def show_tab(self, name: str) -> None:
         if name in TAB_NAMES:
             self.select(TAB_NAMES.index(name))
+        elif name == ZIEL_GEAENDERT:
+            # Übersicht, Bereich "In ILIAS geändert" hervorheben
+            self.select(0)
+            self.overview.focus_changed()
         self.showNormal()
+        activate_app()
         self.raise_()
         self.activateWindow()
 

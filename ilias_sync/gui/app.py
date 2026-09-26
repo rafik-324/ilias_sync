@@ -23,6 +23,7 @@ from ilias_sync import __version__
 from ilias_sync.gui import theme
 from ilias_sync.gui.controller import Controller
 from ilias_sync.gui.icons import app_icon
+from ilias_sync.gui.macos import activate_app, hide_dock_icon
 from ilias_sync.gui.scheduler_gui import Scheduler
 from ilias_sync.gui.setup_wizard import SetupWizard
 from ilias_sync.gui.tray import ZIEL_UEBERSICHT, Tray
@@ -123,11 +124,13 @@ class GuiApp:
         if self.window is None:
             self.window = MainWindow(self.controller)
             self.window.login_requested.connect(self.show_login)
+            self.window.quit_requested.connect(self.quit)
         return self.window
 
     def show_window(self, tab: str = ZIEL_UEBERSICHT) -> None:
         if self.wizard is not None:
             self.wizard.showNormal()
+            activate_app()
             self.wizard.raise_()
             self.wizard.activateWindow()
             return
@@ -145,6 +148,8 @@ class GuiApp:
         self.wizard.accepted.connect(self._wizard_done)
         self.wizard.rejected.connect(self.quit)
         self.wizard.show()
+        activate_app()
+        self.wizard.raise_()
 
     def _wizard_done(self) -> None:
         start = self.wizard.start_sync_requested() if self.wizard else False
@@ -157,11 +162,13 @@ class GuiApp:
 
     def show_login(self) -> None:
         if self._login_dialog is not None:
+            activate_app()
             self._login_dialog.raise_()
             self._login_dialog.activateWindow()
             return
         dlg = LoginDialog(self.api, self.api.stored_username(), self.window)
         self._login_dialog = dlg
+        activate_app()
         if dlg.exec():
             self.controller.logged_in()
         self._login_dialog = None
@@ -199,6 +206,7 @@ def run(api, argv: list[str] | None = None, show_window: bool = False) -> int:
     QCoreApplication.setApplicationVersion(__version__)
     app = QApplication.instance() or QApplication(argv or sys.argv)
     app.setQuitOnLastWindowClosed(False)
+    hide_dock_icon()
     app.setWindowIcon(app_icon())
     theme.apply(app)
 

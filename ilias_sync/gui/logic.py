@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from ilias_sync.api import ActionKind, Config, DownloadedFile, PlannedAction
+from ilias_sync.api import ActionKind, ChangedFile, Config, DownloadedFile, PlannedAction
 
 # ---------------- Zeitangaben ----------------
 
@@ -106,6 +106,25 @@ def bundle_new_files(files: list[DownloadedFile]) -> str | None:
     )
 
 
+def bundle_changed_files(files: list[ChangedFile]) -> str | None:
+    """Gebündelter Text für in ILIAS geänderte Dateien, None wenn keine."""
+    if not files:
+        return None
+    per_course = Counter(course_display_name(f.course_name) for f in files)
+    total = len(files)
+    verb = "wurde" if total == 1 else "wurden"
+    if len(per_course) == 1:
+        where = next(iter(per_course))
+    else:
+        where = _plural(len(per_course), "Kurs", "Kursen")
+    return f"{_plural(total, 'Datei', 'Dateien')} in {where} {verb} in ILIAS geändert"
+
+
+def changed_count_text(n: int) -> str:
+    """Eintrag im Tray Menü, z. B. "3 Dateien in ILIAS geändert"."""
+    return f"{_plural(n, 'Datei', 'Dateien')} in ILIAS geändert"
+
+
 def unassigned_course_text(names: list[str]) -> str | None:
     if not names:
         return None
@@ -118,6 +137,7 @@ def unassigned_course_text(names: list[str]) -> str | None:
 
 ACTION_LABELS: dict[ActionKind, str] = {
     ActionKind.NEW: "Neu",
+    ActionKind.CHANGED: "In ILIAS geändert",
     ActionKind.UPDATE: "Aktualisierung",
     ActionKind.CONFLICT: "Konflikt",
     ActionKind.SKIP_REMOVED: "Übersprungen (entfernt)",
@@ -128,6 +148,7 @@ ACTION_LABELS: dict[ActionKind, str] = {
 
 ACTION_HINTS: dict[ActionKind, str] = {
     ActionKind.NEW: "Datei wird neu heruntergeladen",
+    ActionKind.CHANGED: "Neue Version in ILIAS. Wird nicht automatisch geladen, du entscheidest in der Übersicht",
     ActionKind.UPDATE: "In ILIAS geändert. Die alte Version wird zu *_alt_<Datum> umbenannt",
     ActionKind.CONFLICT: "Von dir lokal geändert. Neue Version kommt als *_ilias_<Datum> daneben",
     ActionKind.SKIP_REMOVED: "Von dir verschoben oder gelöscht, wird nicht erneut geladen",
@@ -137,6 +158,9 @@ ACTION_HINTS: dict[ActionKind, str] = {
 }
 
 SKIP_KINDS = {ActionKind.SKIP_REMOVED, ActionKind.SKIP_IGNORED}
+
+# UPDATE und CONFLICT erzeugt das Backend nicht mehr, daher nicht in der Legende
+LEGEND_KINDS = [k for k in ActionKind if k not in (ActionKind.UPDATE, ActionKind.CONFLICT)]
 
 
 @dataclass
@@ -187,6 +211,7 @@ def build_preview_tree(
 class PreviewSummary:
     new: int = 0
     new_bytes: int = 0
+    changed: int = 0
     updates: int = 0
     conflicts: int = 0
     skipped: int = 0
@@ -199,6 +224,8 @@ class PreviewSummary:
         if self.new_bytes:
             new += f" ({format_size(self.new_bytes)})"
         parts.append(new)
+        if self.changed:
+            parts.append(f"{self.changed} in ILIAS geändert")
         if self.updates:
             parts.append(_plural(self.updates, "Aktualisierung", "Aktualisierungen"))
         if self.conflicts:
@@ -218,6 +245,8 @@ def summarize(actions: list[PlannedAction]) -> PreviewSummary:
         if a.kind == ActionKind.NEW:
             s.new += 1
             s.new_bytes += a.size or 0
+        elif a.kind == ActionKind.CHANGED:
+            s.changed += 1
         elif a.kind == ActionKind.UPDATE:
             s.updates += 1
         elif a.kind == ActionKind.CONFLICT:

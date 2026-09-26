@@ -26,7 +26,9 @@ def test_dry_run_schreibt_nichts(fake):
     # nur die Logdatei darf sich ändern, keine Downloads
     assert [p for p in after if p.suffix != ".log"] == [p for p in before if p.suffix != ".log"]
     kinds = {a.kind for a in actions}
-    assert {ActionKind.NEW, ActionKind.UPDATE, ActionKind.CONFLICT, ActionKind.UNASSIGNED} <= kinds
+    assert {ActionKind.NEW, ActionKind.CHANGED, ActionKind.UNASSIGNED} <= kinds
+    # veraltete Arten erzeugt das Backend nicht mehr
+    assert not kinds & {ActionKind.UPDATE, ActionKind.CONFLICT}
 
 
 def test_sync_und_zweiter_sync(fake):
@@ -79,6 +81,47 @@ def test_redownload(fake):
     entry = fake.redownload(removed[0].ref_id)
     assert entry.local_path.is_file()
     assert fake.removed_items() == []
+
+
+def test_geaenderte_dateien_werden_nur_gemeldet(fake):
+    before = {c.ref_id for c in fake.changed_items()}
+    assert len(before) == 2
+    paths = {c.ref_id: c.local_path for c in fake.changed_items()}
+    contents = {r: p.read_bytes() for r, p in paths.items()}
+    result = fake.sync(_noop, threading.Event())
+    # eine weitere Datei wird als geändert erkannt, aber nicht geladen
+    assert len(result.changed_files) == 1
+    assert result.changed_files[0].ref_id not in before
+    assert len(fake.changed_items()) == 3
+    assert {f.ref_id for f in result.new_files}.isdisjoint(c.ref_id for c in fake.changed_items())
+    assert {r: p.read_bytes() for r, p in paths.items()} == contents
+    # zweiter Sync meldet dieselben Änderungen nicht erneut
+    assert fake.sync(_noop, threading.Event()).changed_files == []
+
+
+def test_geaenderte_datei_herunterladen_legt_daneben(fake):
+    changed = fake.changed_items()[0]
+    original = changed.local_path.read_bytes()
+    entry = fake.download_changed(changed.ref_id)
+    assert entry.local_path.parent == changed.local_path.parent
+    assert "_ilias_" in entry.name and entry.local_path.suffix == changed.local_path.suffix
+    assert entry.local_path.is_file()
+    assert changed.local_path.read_bytes() == original
+    assert changed.ref_id not in {c.ref_id for c in fake.changed_items()}
+
+
+def test_geaenderte_datei_ignorieren(fake):
+    changed = fake.changed_items()[0]
+    fake.dismiss_changed(changed.ref_id)
+    assert changed.ref_id not in {c.ref_id for c in fake.changed_items()}
+    assert not any("_ilias_" in p.name for p in changed.local_path.parent.iterdir())
+
+
+def test_geaenderte_datei_offline(tmp_path):
+    api = FakeApi(delay=0.0, workdir=tmp_path / "w", fail={"offline"})
+    with pytest.raises(NetworkError):
+        api.download_changed(api.changed_items()[0].ref_id)
+    assert len(api.changed_items()) == 2
 
 
 def test_mapping_vorschlaege(fake):

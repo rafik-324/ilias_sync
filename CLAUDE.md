@@ -36,7 +36,7 @@ Backend und GUI werden parallel von zwei Claude Sitzungen entwickelt. Jede hat i
 | Windows: `C:\Users\rafik\OneDrive\01_Universität_Mannheim\code_projects\Ilias_getter` | `main` | Backend Agent |
 | macOS: `/Users/rafik/Library/CloudStorage/OneDrive-Persönlich/01_Universität_Mannheim/code_projects/Ilias_getter` | `main` | Backend Agent |
 | Windows: `C:\Users\rafik\dev\ilias_sync-gui` (außerhalb von OneDrive) | `gui` | GUI Agent |
-| macOS: noch nicht eingerichtet (geplant `~/dev/ilias_sync-gui`) | `gui` | GUI Agent |
+| macOS: `~/dev/ilias_sync-gui` (eigener Klon statt Worktree, Remote `lokal` = OneDrive Repo, `origin` = GitHub) | `gui` | GUI Agent |
 
 Das Repo liegt in OneDrive und wird auf beiden Rechnern genutzt. Zuerst per `uname` bzw. Plattform prüfen, auf welchem System die Sitzung läuft, und nur die Pfade dieses Systems verwenden. Worktree Einträge des anderen Systems erscheinen bei `git worktree list` als `prunable`: **nie `git worktree prune` ausführen**, sonst ist der Worktree auf dem anderen Rechner kaputt. Den Ordner `tests 2` (OneDrive Konfliktkopie) ignorieren.
 
@@ -101,6 +101,7 @@ ilias_sync/
     scheduler_gui.py   QTimer, löst den Intervall Sync aus
     fake_backend.py    Attrappe von api.py für Entwicklung und Tests
     icons.py           Icons für Tray Zustände
+    macos.py           macOS Laufzeit Hilfen per ctypes: kein Dock Icon, App nach vorne holen
   platform_utils.py    Autostart, Dateinamen, Unicode, Link Dateien
 tests/
   gui/
