@@ -365,8 +365,8 @@ def cmd_test_sync(target: Path, with_videos: bool) -> int:
 
 KIND_LABELS = {
     ActionKind.NEW: "NEU",
-    ActionKind.UPDATE: "AKTUALISIERT",
-    ActionKind.CONFLICT: "KONFLIKT",
+    ActionKind.CONFLICT: "NAME BELEGT, KOMMT ALS _ilias_<Datum> DANEBEN",
+    ActionKind.CHANGED: "IN ILIAS GEÄNDERT, WIRD NUR GEMELDET",
     ActionKind.SKIP_REMOVED: "ENTFERNT",
 }
 
@@ -455,8 +455,11 @@ def cmd_sync(dry_run: bool, output: Path | None) -> int:
         if sys.stderr.isatty():
             print(file=sys.stderr)
         run = sync_result.run
-        print(f"Sync fertig in {time.monotonic() - started:.0f} s: {run.new} neu, {run.updated} aktualisiert, "
-              f"{run.errors} Fehler")
+        print(f"Sync fertig in {time.monotonic() - started:.0f} s: {run.new} neu, {run.errors} Fehler")
+        if sync_result.changed_files:
+            print(f"{len(sync_result.changed_files)} Dateien wurden in ILIAS geändert (nicht geladen):")
+            for f in sync_result.changed_files:
+                print("  ", f.local_path.relative_to(root).as_posix())
         for e in sync_result.errors:
             print("  FEHLER", e)
         return 0 if not sync_result.errors else 2

@@ -322,7 +322,8 @@ Config liegt im Config Verzeichnis von `platformdirs`, wird beim Start validiert
 * **Nie löschen, nie Nutzerdateien überschreiben**
 * Download erst in temporäre Datei im Zielordner (`.part`), nach vollständigem Download atomar umbenennen (`os.replace`)
 * Datei in ILIAS nach dem Herunterladen geändert (Änderungsdatum oder Größe anders): **nicht automatisch laden** (Vorgabe des Nutzers), nur als `ilias_changed` im Index vermerken und in der App melden. Der Nutzer lädt selbst per Klick, dann kommt die neue Version als `<name>_ilias_<YYYY-MM-DD>.<ext>` neben die vorhandene Datei, die unverändert bleibt. Oder er ignoriert die Änderung
-* Lokale Datei vom Nutzer verändert (Hash weicht vom Index ab): nie anfassen, Status `user_modified`
+* Zielname schon belegt, Datei aber nicht im Index: vorhandene Datei bleibt, die ILIAS Datei kommt als `<name>_ilias_<YYYY-MM-DD>.<ext>` daneben. **Kein Inhaltsvergleich**, das Tool bleibt schmal (Entscheidung des Nutzers 2026-09-26). Das Tool benennt nie etwas um, eigene umbenannte Dateien tauscht der Nutzer selbst aus
+* Lokale Datei vom Nutzer verändert: nie anfassen
 * Datei vom Nutzer verschoben oder gelöscht (laut Index schon geladen): **nicht erneut laden**. In der GUI gibt es "Erneut herunterladen" pro Datei
 * Ordner aus `[ignore]` werden nie betreten oder beschrieben
 * Dry Run Modus: zeigt geplante Aktionen, schreibt nichts
@@ -405,7 +406,7 @@ Sync läuft immer in einem Worker Thread (`QThread`), die GUI blockiert nie.
 
 Nach jedem Meilenstein lauffähig und getestet, bevor der nächste beginnt.
 
-**Stand (2026-09-25)**: Meilenstein 1 und 2 fertig, Crawler mit 3 parallelen Abrufen und automatischem Relogin. Meilenstein 4 (Mapper) vorgezogen und weitgehend fertig. Meilenstein 3 im CLI fertig: Status Index (`state.py`), Versionierung (`_alt_`, `_ilias_`), `--dry-run` und `--sync` (`sync.py`). Es fehlt noch die echte `api.Api` für die GUI. `--test-sync` bleibt für Tests. **Der echte `01_SEMESTER` wird nie beschrieben** (Vorgabe des Nutzers). GUI (Meilenstein 6) läuft parallel auf Branch `gui` gegen das Fake Backend.
+**Stand (2026-09-25)**: Meilenstein 1 und 2 fertig, Crawler mit 3 parallelen Abrufen und automatischem Relogin. Meilenstein 4 (Mapper) vorgezogen und weitgehend fertig. Meilenstein 3 im CLI fertig: Status Index (`state.py`), `--dry-run` und `--sync` (`sync.py`). Seit 2026-09-26 (Mac): kein `_alt_` mehr, geänderte Dateien nur melden (`ilias_changed`, `sync.download_changed`, `State.dismiss_changed`), belegte Namen ohne Inhaltsvergleich als `_ilias_<Datum>` daneben. Alte Index Datenbanken bekommen die neuen Spalten beim Öffnen. Es fehlt noch die echte `api.Api` für die GUI. `--test-sync` bleibt für Tests. **Der echte `01_SEMESTER` wird nie beschrieben** (Vorgabe des Nutzers). GUI (Meilenstein 6) läuft parallel auf Branch `gui` gegen das Fake Backend.
 
 Entscheidung des Nutzers (2026-09-25): **Der erste echte Sync läuft in einen komplett neuen, leeren Basisordner** und lädt alles einmal herunter (auch Videos, auch den Lizenzkurs unter `_Ohne_Semester`). Die bisherigen eigenen Ordner bleiben unberührt, das Tool legt die Struktur selbst an. Umsetzung:
 * Erster Sync (Index für diesen Uni Ordner leer) nur, wenn der Uni Ordner fehlt oder leer ist, sonst Abbruch mit Hinweis (`sync.check_first_sync`, `BaseDirCheck.is_empty`)

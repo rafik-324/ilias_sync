@@ -7,8 +7,14 @@ wirken. Lokale Pfade stehen relativ zum Uni Ordner mit "/" getrennt, so überste
 der Index auch ein Verschieben des ganzen Ordners.
 
 Tabelle items:     ref_id, course_ref_id, course_name, type, ilias_path, local_path,
-                   ilias_mtime, size, sha256, downloaded_at, status
+                   ilias_mtime, size, sha256, downloaded_at, status,
+                   new_mtime, new_size, detected_at, url
 Tabelle sync_runs: started_at, finished_at, new, updated, errors, cancelled
+
+In ILIAS geänderte Dateien werden nicht automatisch geladen (Entscheidung des
+Nutzers): Status ilias_changed, new_mtime/new_size beschreiben die neue Version,
+ilias_mtime/size bleiben die der geladenen. Ältere Datenbanken bekommen die
+neuen Spalten beim Öffnen automatisch.
 """
 
 from __future__ import annotations
@@ -35,7 +41,11 @@ CREATE TABLE IF NOT EXISTS items (
     size          INTEGER,
     sha256        TEXT,
     downloaded_at TEXT,
-    status        TEXT NOT NULL
+    status        TEXT NOT NULL,
+    new_mtime     TEXT,
+    new_size      INTEGER,
+    detected_at   TEXT,
+    url           TEXT
 );
 CREATE INDEX IF NOT EXISTS items_downloaded ON items (downloaded_at);
 CREATE TABLE IF NOT EXISTS sync_runs (
@@ -50,7 +60,10 @@ CREATE TABLE IF NOT EXISTS sync_runs (
 """
 
 ITEM_COLUMNS = ("ref_id", "course_ref_id", "course_name", "type", "ilias_path", "local_path",
-                "ilias_mtime", "size", "sha256", "downloaded_at", "status")
+                "ilias_mtime", "size", "sha256", "downloaded_at", "status",
+                "new_mtime", "new_size", "detected_at", "url")
+# Spalten, die nach der ersten Version dazukamen: werden in alten Datenbanken ergänzt
+ADDED_COLUMNS = {"new_mtime": "TEXT", "new_size": "INTEGER", "detected_at": "TEXT", "url": "TEXT"}
 
 
 @dataclass
@@ -66,6 +79,10 @@ class Item:
     sha256: str | None                # Hash der Datei, wie sie aus ILIAS kam
     downloaded_at: datetime | None
     status: ItemStatus
+    new_mtime: datetime | None = None   # nur ilias_changed: neue Version in ILIAS
+    new_size: int | None = None
+    detected_at: datetime | None = None
+    url: str | None = None              # Download URL aus dem letzten Crawl
 
 
 def rel_to_str(rel: tuple[str, ...]) -> str:
@@ -101,6 +118,10 @@ class State:
         self._db.row_factory = sqlite3.Row
         with self._lock, self._db:
             self._db.executescript(SCHEMA)
+            present = {r["name"] for r in self._db.execute("PRAGMA table_info(items)")}
+            for name, typ in ADDED_COLUMNS.items():
+                if name not in present:
+                    self._db.execute(f"ALTER TABLE items ADD COLUMN {name} {typ}")
 
     def close(self) -> None:
         with self._lock:
@@ -121,6 +142,8 @@ class State:
             type=row["type"], ilias_path=row["ilias_path"], local_path=row["local_path"],
             ilias_mtime=_dt(row["ilias_mtime"]), size=row["size"], sha256=row["sha256"],
             downloaded_at=_dt(row["downloaded_at"]), status=ItemStatus(row["status"]),
+            new_mtime=_dt(row["new_mtime"]), new_size=row["new_size"], detected_at=_dt(row["detected_at"]),
+            url=row["url"],
         )
 
     def _query(self, sql: str, params: tuple = ()) -> list[Item]:
@@ -138,6 +161,7 @@ class State:
         values = (
             item.ref_id, item.course_ref_id, item.course_name, item.type, item.ilias_path, item.local_path,
             _iso(item.ilias_mtime), item.size, item.sha256, _iso(item.downloaded_at), item.status.value,
+            _iso(item.new_mtime), item.new_size, _iso(item.detected_at), item.url,
         )
         with self._lock, self._db:
             self._db.execute(
@@ -149,6 +173,40 @@ class State:
     def set_status(self, ref_id: int, status: ItemStatus) -> None:
         with self._lock, self._db:
             self._db.execute("UPDATE items SET status = ? WHERE ref_id = ?", (status.value, ref_id))
+
+    def set_url(self, ref_id: int, url: str) -> None:
+        with self._lock, self._db:
+            self._db.execute("UPDATE items SET url = ? WHERE ref_id = ?", (url, ref_id))
+
+    def mark_changed(self, ref_id: int, new_mtime: datetime | None, new_size: int | None,
+                     detected_at: datetime) -> bool:
+        """Neue ILIAS Version vermerken, lokale Datei bleibt. True, wenn die Änderung neu ist."""
+        with self._lock, self._db:
+            row = self._db.execute("SELECT status, new_mtime, new_size FROM items WHERE ref_id = ?",
+                                   (ref_id,)).fetchone()
+            if row is None:
+                raise KeyError(ref_id)
+            if row["status"] == ItemStatus.ILIAS_CHANGED.value and \
+                    (row["new_mtime"], row["new_size"]) == (_iso(new_mtime), new_size):
+                return False
+            self._db.execute(
+                "UPDATE items SET status = ?, new_mtime = ?, new_size = ?, detected_at = ? WHERE ref_id = ?",
+                (ItemStatus.ILIAS_CHANGED.value, _iso(new_mtime), new_size, _iso(detected_at), ref_id),
+            )
+        return True
+
+    def dismiss_changed(self, ref_id: int) -> None:
+        """Änderung ignorieren: neue ILIAS Werte gelten als bekannt, nicht mehr melden."""
+        with self._lock, self._db:
+            self._db.execute(
+                "UPDATE items SET ilias_mtime = new_mtime, size = new_size, status = ?, "
+                "new_mtime = NULL, new_size = NULL, detected_at = NULL WHERE ref_id = ? AND status = ?",
+                (ItemStatus.OK.value, ref_id, ItemStatus.ILIAS_CHANGED.value),
+            )
+
+    def changed(self) -> list[Item]:
+        return self._query("SELECT * FROM items WHERE status = ? ORDER BY detected_at DESC, local_path",
+                           (ItemStatus.ILIAS_CHANGED.value,))
 
     def recent(self, limit: int = 50) -> list[Item]:
         return self._query(

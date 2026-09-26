@@ -110,31 +110,91 @@ def test_moved_by_user_counts_as_removed(env):
     assert jobs[0].kind == ActionKind.SKIP_REMOVED
 
 
-def test_changed_in_ilias_keeps_old_version(env):
+def test_changed_in_ilias_is_only_reported(env):
     root, st = env
     run(mapping(mapped(1)), st, root, FakeSession({"u1": b"v1"}))
-    jobs, result = run(mapping(mapped(1, mtime=datetime(2026, 9, 20, 8, 0))), st, root, FakeSession({"u1": b"v2"}))
-    assert [j.kind for j in jobs] == [ActionKind.UPDATE]
-    assert target(root).read_bytes() == b"v2"
-    assert target(root, f"skript_alt_{TODAY}.pdf").read_bytes() == b"v1"
+    session = FakeSession({"u1": b"v2"})
+    new_mtime = datetime(2026, 9, 20, 8, 0)
+    jobs, result = run(mapping(mapped(1, mtime=new_mtime)), st, root, session)
+    assert [j.kind for j in jobs] == [ActionKind.CHANGED]
+    assert session.calls == []
+    assert sorted(p.name for p in target(root).parent.iterdir()) == ["skript.pdf"]
+    assert target(root).read_bytes() == b"v1"
     entry = st.get(1)
-    assert entry.status == ItemStatus.UPDATED and entry.ilias_mtime == datetime(2026, 9, 20, 8, 0)
-    assert result.run.updated == 1
+    assert entry.status == ItemStatus.ILIAS_CHANGED
+    assert (entry.new_mtime, entry.ilias_mtime) == (new_mtime, datetime(2026, 9, 1, 12, 0))
+    assert [f.ref_id for f in result.changed_files] == [1]
+    assert result.changed_files[0].new_mtime == new_mtime
+    assert result.run.new == 0 and result.run.updated == 0
 
 
-def test_changed_in_ilias_and_by_user_is_conflict(env):
+def test_changed_is_reported_once(env):
+    root, st = env
+    run(mapping(mapped(1)), st, root, FakeSession({"u1": b"v1"}))
+    changed = mapping(mapped(1, size=20))
+    _, first = run(changed, st, root, FakeSession({}))
+    _, second = run(changed, st, root, FakeSession({}))
+    assert len(first.changed_files) == 1
+    assert second.changed_files == []
+    # Erneut geändert, bevor der Nutzer reagiert hat: wieder melden
+    _, third = run(mapping(mapped(1, size=30)), st, root, FakeSession({}))
+    assert len(third.changed_files) == 1 and st.get(1).new_size == 30
+
+
+def test_changed_in_ilias_and_by_user_keeps_notes(env):
     root, st = env
     run(mapping(mapped(1)), st, root, FakeSession({"u1": b"v1"}))
     target(root).write_bytes(b"meine Notizen")
-    jobs, _ = run(mapping(mapped(1, size=20)), st, root, FakeSession({"u1": b"v2"}))
-    assert [j.kind for j in jobs] == [ActionKind.CONFLICT]
+    session = FakeSession({"u1": b"v2"})
+    jobs, _ = run(mapping(mapped(1, size=20)), st, root, session)
+    assert [j.kind for j in jobs] == [ActionKind.CHANGED]
+    assert session.calls == []
     assert target(root).read_bytes() == b"meine Notizen"
-    assert target(root, f"skript_ilias_{TODAY}.pdf").read_bytes() == b"v2"
+
+
+def test_download_changed_puts_new_version_next_to_file(env):
+    root, st = env
+    run(mapping(mapped(1)), st, root, FakeSession({"u1": b"v1"}))
+    target(root).write_bytes(b"meine Notizen")
+    run(mapping(mapped(1, size=20)), st, root, FakeSession({}))
+    f = sync.download_changed(FakeSession({"u1": b"v2"}), st, root, 1)
+    assert f.local_path == target(root, f"skript_ilias_{TODAY}.pdf")
+    assert f.local_path.read_bytes() == b"v2"
+    assert target(root).read_bytes() == b"meine Notizen"
     entry = st.get(1)
-    assert entry.status == ItemStatus.USER_MODIFIED and entry.size == 20
-    assert entry.local_path.endswith("/skript.pdf")
-    # In ILIAS unverändert: kein weiterer Konflikt
+    assert entry.status == ItemStatus.UPDATED and entry.size == 20 and entry.new_size is None
+    # Danach ist alles ruhig
     assert sync.plan(mapping(mapped(1, size=20)), st, root, Config(base_dir=None)) == []
+
+
+def test_download_changed_needs_changed_status(env):
+    root, st = env
+    run(mapping(mapped(1)), st, root, FakeSession({"u1": b"v1"}))
+    with pytest.raises(sync.NotAvailable):
+        sync.download_changed(FakeSession({"u1": b"v2"}), st, root, 1)
+    with pytest.raises(sync.NotAvailable):
+        sync.download_changed(FakeSession({}), st, root, 99)
+
+
+def test_dismissed_change_stays_quiet(env):
+    root, st = env
+    run(mapping(mapped(1)), st, root, FakeSession({"u1": b"v1"}))
+    run(mapping(mapped(1, size=20)), st, root, FakeSession({}))
+    st.dismiss_changed(1)
+    assert st.get(1).status == ItemStatus.OK and st.get(1).size == 20
+    assert sync.plan(mapping(mapped(1, size=20)), st, root, Config(base_dir=None)) == []
+    assert target(root).read_bytes() == b"v1"
+
+
+def test_redownload_removed_file(env):
+    root, st = env
+    run(mapping(mapped(1)), st, root, FakeSession({"u1": b"v1"}))
+    target(root).unlink()
+    run(mapping(mapped(1)), st, root, FakeSession({}))
+    assert st.get(1).status == ItemStatus.USER_REMOVED
+    sync.redownload(FakeSession({"u1": b"v1"}), st, root, 1)
+    assert target(root).read_bytes() == b"v1"
+    assert st.get(1).status == ItemStatus.OK
 
 
 def test_user_modified_without_ilias_change_is_left_alone(env):
@@ -144,35 +204,18 @@ def test_user_modified_without_ilias_change_is_left_alone(env):
     assert sync.plan(mapping(mapped(1)), st, root, Config(base_dir=None)) == []
 
 
-def test_unknown_identical_file_is_adopted(env):
-    root, st = env
-    target(root).parent.mkdir(parents=True)
-    target(root).write_bytes(b"v1")
-    jobs, result = run(mapping(mapped(1)), st, root, FakeSession({"u1": b"v1"}))
-    assert [j.kind for j in jobs] == [ActionKind.CONFLICT]
-    assert sorted(p.name for p in target(root).parent.iterdir()) == ["skript.pdf"]
-    assert st.get(1).status == ItemStatus.OK
-    assert result.new_files == []
 
-
-def test_unknown_different_file_is_kept(env):
+def test_occupied_name_is_kept_without_comparing(env):
+    """Kein Inhaltsvergleich: auch eine identische Datei bleibt, die ILIAS Datei kommt daneben."""
     root, st = env
     target(root).parent.mkdir(parents=True)
     target(root).write_bytes(b"eigene Datei")
-    run(mapping(mapped(1)), st, root, FakeSession({"u1": b"v1"}))
+    jobs, _ = run(mapping(mapped(1)), st, root, FakeSession({"u1": b"v1"}))
+    assert [j.kind for j in jobs] == [ActionKind.CONFLICT]
     assert target(root).read_bytes() == b"eigene Datei"
     assert target(root, f"skript_ilias_{TODAY}.pdf").read_bytes() == b"v1"
     assert st.get(1).local_path.endswith(f"skript_ilias_{TODAY}.pdf")
 
-
-def test_versioned_names_never_collide(env):
-    root, st = env
-    run(mapping(mapped(1)), st, root, FakeSession({"u1": b"v1"}))
-    target(root, f"skript_alt_{TODAY}.pdf").write_bytes(b"schon da")
-    run(mapping(mapped(1, size=11)), st, root, FakeSession({"u1": b"v2"}))
-    assert target(root, f"skript_alt_{TODAY}.pdf").read_bytes() == b"schon da"
-    assert target(root, f"skript_alt_{TODAY}_2.pdf").read_bytes() == b"v1"
-    assert target(root).read_bytes() == b"v2"
 
 
 def test_error_is_retried_next_time(env):
@@ -185,14 +228,6 @@ def test_error_is_retried_next_time(env):
     assert [j.kind for j in jobs] == [ActionKind.NEW]
     assert st.get(1).status == ItemStatus.OK
 
-
-def test_failed_update_keeps_original(env):
-    root, st = env
-    run(mapping(mapped(1)), st, root, FakeSession({"u1": b"v1"}))
-    run(mapping(mapped(1, size=11)), st, root, FakeSession({"u1": requests.Timeout()}))
-    assert target(root).read_bytes() == b"v1"
-    assert sorted(p.name for p in target(root).parent.iterdir()) == ["skript.pdf"]
-    assert st.get(1).status == ItemStatus.OK   # nächster Lauf versucht das Update erneut
 
 
 def test_cancel_before_start_downloads_nothing(env):

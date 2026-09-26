@@ -1,5 +1,6 @@
 """Status Index Tests: Einträge, Läufe, eine Datenbank pro Uni Ordner."""
 
+import sqlite3
 from datetime import datetime
 
 from ilias_sync import state
@@ -62,3 +63,25 @@ def test_rel_paths(tmp_path):
     rel = state.rel_to_str(("01_SEMESTER", "02_Übung", "a.pdf"))
     assert rel == "01_SEMESTER/02_Übung/a.pdf"
     assert state.str_to_path(tmp_path, rel) == tmp_path / "01_SEMESTER" / "02_Übung" / "a.pdf"
+
+
+def test_old_database_gets_new_columns(tmp_path):
+    """Index vom Windows Rechner (ohne neue Spalten) wird beim Öffnen ergänzt, Daten bleiben."""
+    path = tmp_path / "alt.sqlite3"
+    con = sqlite3.connect(path)
+    con.executescript("""
+        CREATE TABLE items (ref_id INTEGER PRIMARY KEY, course_ref_id INTEGER NOT NULL, course_name TEXT NOT NULL,
+            type TEXT NOT NULL, ilias_path TEXT NOT NULL, local_path TEXT NOT NULL, ilias_mtime TEXT, size INTEGER,
+            sha256 TEXT, downloaded_at TEXT, status TEXT NOT NULL);
+        INSERT INTO items VALUES (1, 100, 'Marketing', 'file', 'M / a.pdf', '01_SEMESTER/a.pdf',
+            '2026-09-01T12:00:00', 10, 'abc', '2026-09-25T12:00:00', 'ok');
+    """)
+    con.commit()
+    con.close()
+    with state.State(path) as st:
+        item = st.get(1)
+        assert item.local_path == "01_SEMESTER/a.pdf" and item.url is None and item.new_mtime is None
+        st.set_url(1, "u1")
+        assert st.mark_changed(1, None, 20, datetime(2026, 9, 26))
+        assert [i.ref_id for i in st.changed()] == [1]
+        assert st.get(1).url == "u1"

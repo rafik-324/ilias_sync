@@ -41,8 +41,8 @@ class ItemStatus(Enum):
 class ActionKind(Enum):
     NEW = "new"                    # neue Datei
     CHANGED = "changed"            # in ILIAS geändert: wird nur gemeldet, nicht geladen
-    UPDATE = "update"              # veraltet, wird vom Backend nicht mehr erzeugt
-    CONFLICT = "conflict"          # veraltet, wird vom Backend nicht mehr erzeugt
+    UPDATE = "update"              # veraltet, wird vom Backend nicht mehr erzeugt (kein _alt_ mehr)
+    CONFLICT = "conflict"          # Zielname belegt: vorhandene Datei bleibt, ILIAS Datei kommt als *_ilias_<Datum> daneben
     SKIP_REMOVED = "skip_removed"  # vom Nutzer entfernt, wird nicht geladen
     SKIP_IGNORED = "skip_ignored"  # liegt in [ignore]
     CREATE_DIR = "create_dir"

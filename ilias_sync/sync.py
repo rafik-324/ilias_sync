@@ -1,16 +1,15 @@
 """
 Sync planen und ausführen: Mapper Ergebnis + Status Index + Dateisystem -> Aktionen.
 
-Regeln laut CLAUDE.md "Download und Sicherheitsregeln":
+Regeln laut CLAUDE.md "Download und Sicherheitsregeln" (schmal, kein Inhaltsvergleich):
   * Nicht im Index, Ziel frei:                 NEW, laden
-  * Nicht im Index, Ziel belegt:               CONFLICT, laden und vergleichen. Gleicher
-                                               Inhalt: vorhandene Datei übernehmen, sonst
-                                               neue Version als <name>_ilias_<Datum>
+  * Nicht im Index, Ziel belegt:               CONFLICT, vorhandene Datei bleibt, ILIAS Datei
+                                               kommt als <name>_ilias_<Datum> daneben
   * Im Index, lokale Datei fehlt:              SKIP_REMOVED, als user_removed merken, nie neu laden
   * Im Index, in ILIAS unverändert:            nichts
-  * In ILIAS geändert, lokal unverändert:      UPDATE, alte Version zu <name>_alt_<Datum>
-  * In ILIAS geändert, lokal vom Nutzer
-    geändert (Hash weicht ab):                 CONFLICT, neue Version als <name>_ilias_<Datum>
+  * Im Index, in ILIAS geändert:               CHANGED, nicht laden, nur als ilias_changed melden.
+                                               Der Nutzer lädt per download_changed (als
+                                               <name>_ilias_<Datum> daneben) oder ignoriert
 
 Planen (dry_run) schreibt nichts, weder Dateien noch Index. Gelöscht wird nie etwas
 außer eigenen .part Dateien.
@@ -19,19 +18,19 @@ außer eigenen .part Dateien.
 from __future__ import annotations
 
 import logging
-import os
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import requests
 
 from . import downloader
 from .api import (
-    ActionKind, Config, DownloadedFile, IliasCourse, ItemStatus, PlannedAction, Progress, SyncResult, SyncRun,
+    ActionKind, ChangedFile, Config, DownloadedFile, IliasCourse, ItemStatus, PlannedAction, Progress, SyncResult,
+    SyncRun,
 )
 from .crawler import Throttle
 from .mapper import CourseMapping, MappedItem, MappingResult, is_video_name
@@ -47,7 +46,7 @@ log = logging.getLogger(__name__)
 class Job:
     kind: ActionKind
     item: MappedItem
-    target: Path                  # Ziel (NEW), vorhandene lokale Datei (UPDATE, CONFLICT, SKIP_REMOVED)
+    target: Path                  # Ziel (NEW), belegtes Ziel (CONFLICT), vorhandene Datei (CHANGED, SKIP_REMOVED)
     entry: Item | None            # Index Eintrag, falls vorhanden
     mark_removed: bool = False    # SKIP_REMOVED erstmals erkannt, Status beim Sync speichern
 
@@ -72,10 +71,15 @@ def wanted(item: MappedItem, cfg: Config) -> bool:
 
 
 def ilias_changed(entry: Item, item: MappedItem) -> bool:
+    """ILIAS Werte weichen von der geladenen (bzw. schon gemeldeten) Version ab."""
     obj = item.obj
-    if obj.mtime and entry.ilias_mtime and obj.mtime != entry.ilias_mtime:
+    if entry.status == ItemStatus.ILIAS_CHANGED:
+        mtime, size = entry.new_mtime, entry.new_size
+    else:
+        mtime, size = entry.ilias_mtime, entry.size
+    if obj.mtime and mtime and obj.mtime != mtime:
         return True
-    return obj.size is not None and entry.size is not None and obj.size != entry.size
+    return obj.size is not None and size is not None and obj.size != size
 
 
 def plan(mapping: MappingResult, st: State, root: Path, cfg: Config, problems: list[str] | None = None) -> list[Job]:
@@ -93,9 +97,8 @@ def plan(mapping: MappingResult, st: State, root: Path, cfg: Config, problems: l
                 jobs.append(Job(ActionKind.SKIP_REMOVED, item, local, entry))
             elif not local.is_file():
                 jobs.append(Job(ActionKind.SKIP_REMOVED, item, local, entry, mark_removed=True))
-            elif ilias_changed(entry, item):
-                modified = entry.sha256 is not None and downloader.file_sha256(local) != entry.sha256
-                jobs.append(Job(ActionKind.CONFLICT if modified else ActionKind.UPDATE, item, local, entry))
+            elif entry.status == ItemStatus.ILIAS_CHANGED or ilias_changed(entry, item):
+                jobs.append(Job(ActionKind.CHANGED, item, local, entry))
             continue
         try:
             target = fit_path(root.joinpath(*item.rel_path))
@@ -150,61 +153,29 @@ def check_first_sync(st: State, root: Path) -> str | None:
 @dataclass
 class Outcome:
     job: Job
-    status: str                   # "neu", "aktualisiert", "konflikt", "übernommen", "fehler", "abgebrochen"
+    status: str                   # "neu", "fehler", "abgebrochen"
     path: Path | None = None      # wohin die ILIAS Datei geschrieben wurde
     sha256: str | None = None
     error: str | None = None
 
 
-def _fetch_part(session, job: Job, part: Path, throttle, relogin) -> str:
-    _, sha = downloader.fetch_to_part(session, job.item.obj.url, part, job.target, throttle, relogin)
-    return sha
-
-
 def run_job(job: Job, session: requests.Session, throttle: Throttle | None, relogin: Callable[[], None] | None,
             today: date, cancel: threading.Event) -> Outcome:
-    """Eine Aktion ausführen. Wirft nie, Fehler stehen im Ergebnis."""
+    """Eine Aktion ausführen (NEW oder CONFLICT). Wirft nie, Fehler stehen im Ergebnis."""
     if cancel.is_set():
         return Outcome(job, "abgebrochen")
     url = job.item.obj.url
-    if job.kind == ActionKind.NEW:
-        r = downloader.download_file(session, url, job.target, throttle, relogin)
-        if r.status == "neu":
-            return Outcome(job, "neu", r.path, r.sha256)
-        return Outcome(job, "fehler", error=r.error or "Ziel wurde während des Syncs angelegt")
-
-    if job.kind == ActionKind.CONFLICT and job.entry is not None and job.entry.status != ItemStatus.ERROR:
-        # Nutzer hat die Datei geändert: seine Version bleibt, neue daneben
+    target = job.target
+    if job.kind == ActionKind.CONFLICT:
+        target = downloader.versioned_path(job.target, "ilias", today)
+    r = downloader.download_file(session, url, target, throttle, relogin)
+    if r.status == "vorhanden":
+        # Während des Syncs angelegt: nicht überschreiben, mit Datum daneben
         r = downloader.download_file(session, url, downloader.versioned_path(job.target, "ilias", today),
                                      throttle, relogin)
-        if r.status == "neu":
-            return Outcome(job, "konflikt", r.path, r.sha256)
-        return Outcome(job, "fehler", error=r.error)
-
-    # UPDATE oder unbekannte Datei am Ziel: erst vollständig laden, dann umbenennen
-    part = downloader.part_path(job.target)
-    try:
-        sha = _fetch_part(session, job, part, throttle, relogin)
-        if job.kind == ActionKind.UPDATE:
-            if job.target.exists():
-                os.replace(job.target, downloader.versioned_path(job.target, "alt", today))
-            if job.target.exists():   # Nutzer war schneller: nichts überschreiben
-                new_path = downloader.versioned_path(job.target, "ilias", today)
-                os.replace(part, new_path)
-                return Outcome(job, "konflikt", new_path, sha)
-            os.replace(part, job.target)
-            return Outcome(job, "aktualisiert", job.target, sha)
-        # Datei lag schon am Ziel, aber nicht im Index
-        if job.target.is_file() and downloader.file_sha256(job.target) == sha:
-            part.unlink(missing_ok=True)
-            return Outcome(job, "übernommen", job.target, sha)
-        new_path = downloader.versioned_path(job.target, "ilias", today)
-        os.replace(part, new_path)
-        return Outcome(job, "konflikt", new_path, sha)
-    except (requests.RequestException, OSError, downloader.DownloadError, ValueError) as e:
-        part.unlink(missing_ok=True)
-        log.warning("Sync fehlgeschlagen (%s): %s", job.target.name, downloader.error_text(e))
-        return Outcome(job, "fehler", error=downloader.error_text(e))
+    if r.status == "neu":
+        return Outcome(job, "neu", r.path, r.sha256)
+    return Outcome(job, "fehler", error=r.error or "Ziel wurde während des Syncs angelegt")
 
 
 def _record(st: State, root: Path, o: Outcome, now: datetime) -> DownloadedFile | None:
@@ -215,22 +186,13 @@ def _record(st: State, root: Path, o: Outcome, now: datetime) -> DownloadedFile 
     if o.status == "fehler":
         if entry is None or entry.status == ItemStatus.ERROR:
             st.put(Item(item.obj.ref_id, item.course.ref_id, item.course.name, item.obj.type, ilias_path(item),
-                        rel_to_str(o.job.target.relative_to(root).parts), None, None, None, None, ItemStatus.ERROR))
+                        rel_to_str(o.job.target.relative_to(root).parts), None, None, None, None, ItemStatus.ERROR,
+                        url=item.obj.url))
         return None
-
-    if o.status == "konflikt" and entry is not None and entry.status != ItemStatus.ERROR:
-        # Lokale Datei des Nutzers bleibt der Bezug, Hash bleibt der der alten ILIAS Version
-        st.put(Item(entry.ref_id, entry.course_ref_id, item.course.name, entry.type, ilias_path(item),
-                    entry.local_path, item.obj.mtime, item.obj.size, entry.sha256, now, ItemStatus.USER_MODIFIED))
-        status = ItemStatus.USER_MODIFIED
-    else:
-        status = ItemStatus.UPDATED if o.status == "aktualisiert" else ItemStatus.OK
-        st.put(Item(item.obj.ref_id, item.course.ref_id, item.course.name, item.obj.type, ilias_path(item),
-                    rel_to_str(o.path.relative_to(root).parts), item.obj.mtime, item.obj.size, o.sha256, now,
-                    status))
-    if o.status == "übernommen":
-        return None
-    return DownloadedFile(item.obj.ref_id, item.course.name, o.path.name, o.path, now, status)
+    st.put(Item(item.obj.ref_id, item.course.ref_id, item.course.name, item.obj.type, ilias_path(item),
+                rel_to_str(o.path.relative_to(root).parts), item.obj.mtime, item.obj.size, o.sha256, now,
+                ItemStatus.OK, url=item.obj.url))
+    return DownloadedFile(item.obj.ref_id, item.course.name, o.path.name, o.path, now, ItemStatus.OK)
 
 
 def execute(
@@ -252,10 +214,16 @@ def execute(
     today = started.date()
     run_id = st.start_run(started)
 
+    changed: list[ChangedFile] = []
     for job in jobs:
+        obj = job.item.obj
+        if job.entry is not None and obj.url and obj.url != job.entry.url:
+            st.set_url(job.entry.ref_id, obj.url)
         if job.mark_removed:
             st.set_status(job.entry.ref_id, ItemStatus.USER_REMOVED)
-    todo = [j for j in jobs if j.kind in (ActionKind.NEW, ActionKind.UPDATE, ActionKind.CONFLICT)]
+        elif job.kind == ActionKind.CHANGED and st.mark_changed(obj.ref_id, obj.mtime, obj.size, started):
+            changed.append(changed_file(st.get(obj.ref_id), root))
+    todo = [j for j in jobs if j.kind in (ActionKind.NEW, ActionKind.CONFLICT)]
 
     outcomes: list[Outcome] = []
     new_files: list[DownloadedFile] = []
@@ -275,12 +243,62 @@ def execute(
                 cancel.set()
                 raise
     finally:
-        counts = {s: sum(o.status == s for o in outcomes) for s in ("neu", "aktualisiert", "konflikt", "fehler")}
-        run = SyncRun(started, datetime.now(), new=counts["neu"] + counts["konflikt"],
-                      updated=counts["aktualisiert"], errors=counts["fehler"], cancelled=cancel.is_set())
+        counts = {s: sum(o.status == s for o in outcomes) for s in ("neu", "fehler")}
+        run = SyncRun(started, datetime.now(), new=counts["neu"], updated=0, errors=counts["fehler"],
+                      cancelled=cancel.is_set())
         st.finish_run(run_id, run)
 
     errors = [f"{o.job.target.name}: {o.error}" for o in outcomes if o.status == "fehler"]
     unassigned = [IliasCourse(cm.course.ref_id, cm.course.name, cm.semester, cm.course.url)
                   for cm in unassigned_courses(mapping)]
-    return SyncResult(run, new_files, unassigned, errors), outcomes
+    return SyncResult(run, new_files, unassigned, errors, changed), outcomes
+
+
+# ---------------- Auf Wunsch des Nutzers laden ----------------
+
+def changed_file(entry: Item, root: Path) -> ChangedFile:
+    return ChangedFile(entry.ref_id, entry.course_name, PurePosixPath(entry.local_path).name,
+                       str_to_path(root, entry.local_path), entry.ilias_mtime, entry.new_mtime, entry.new_size,
+                       entry.detected_at or datetime.now())
+
+
+class NotAvailable(Exception):
+    """Datei nicht (mehr) ladbar, Text ist anzeigbar."""
+
+
+def _load_for_user(session: requests.Session, st: State, root: Path, ref_id: int, expected: ItemStatus,
+                   throttle: Throttle | None, relogin: Callable[[], None] | None) -> DownloadedFile:
+    entry = st.get(ref_id)
+    if entry is None or entry.status != expected:
+        raise NotAvailable("Die Datei ist nicht mehr in der Liste. Bitte zuerst synchronisieren.")
+    if not entry.url:
+        raise NotAvailable("Für diese Datei ist noch kein Download bekannt. Bitte zuerst synchronisieren.")
+    today = date.today()
+    existing = str_to_path(root, entry.local_path)
+    target = downloader.versioned_path(existing, "ilias", today) if existing.exists() else existing
+    r = downloader.download_file(session, entry.url, target, throttle, relogin)
+    if r.status == "vorhanden":
+        r = downloader.download_file(session, entry.url, downloader.versioned_path(existing, "ilias", today),
+                                     throttle, relogin)
+    if r.status != "neu":
+        raise NotAvailable(f"Download fehlgeschlagen: {r.error or 'Datei existiert bereits'}")
+    now = datetime.now()
+    changed = expected == ItemStatus.ILIAS_CHANGED
+    status = ItemStatus.UPDATED if changed else ItemStatus.OK
+    st.put(Item(entry.ref_id, entry.course_ref_id, entry.course_name, entry.type, entry.ilias_path,
+                rel_to_str(r.path.relative_to(root).parts),
+                entry.new_mtime if changed else entry.ilias_mtime, entry.new_size if changed else entry.size,
+                r.sha256, now, status, url=entry.url))
+    return DownloadedFile(entry.ref_id, entry.course_name, r.path.name, r.path, now, status)
+
+
+def download_changed(session: requests.Session, st: State, root: Path, ref_id: int,
+                     throttle: Throttle | None = None, relogin: Callable[[], None] | None = None) -> DownloadedFile:
+    """Neue ILIAS Version als <name>_ilias_<Datum> neben die vorhandene Datei legen, die unverändert bleibt."""
+    return _load_for_user(session, st, root, ref_id, ItemStatus.ILIAS_CHANGED, throttle, relogin)
+
+
+def redownload(session: requests.Session, st: State, root: Path, ref_id: int,
+               throttle: Throttle | None = None, relogin: Callable[[], None] | None = None) -> DownloadedFile:
+    """Vom Nutzer entfernte Datei erneut an den alten Ort laden, ist dort etwas, mit Datum daneben."""
+    return _load_for_user(session, st, root, ref_id, ItemStatus.USER_REMOVED, throttle, relogin)
