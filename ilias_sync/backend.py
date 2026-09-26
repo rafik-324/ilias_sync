@@ -52,14 +52,18 @@ def translate_errors() -> Iterator[None]:
         raise Cancelled("Abgebrochen.") from None
     except sync.NotAvailable as e:
         raise IliasSyncError(str(e)) from None
-    except requests.exceptions.SSLError:
-        raise NetworkError("Sichere Verbindung zu ILIAS fehlgeschlagen (Zertifikat).") from None
-    except requests.Timeout:
-        raise NetworkError("ILIAS antwortet nicht (Zeitüberschreitung).") from None
     except requests.RequestException as e:
-        raise NetworkError(f"Keine Verbindung zu ILIAS ({type(e).__name__}).") from None
+        # Technische Ursache nur ins Log, der Text ist für Nutzer
+        log.warning("Netzwerkfehler: %s", type(e).__name__)
+        if isinstance(e, requests.exceptions.SSLError):
+            raise NetworkError("Die sichere Verbindung zu ILIAS ist fehlgeschlagen. "
+                               "Bitte später erneut versuchen.") from None
+        if isinstance(e, requests.Timeout):
+            raise NetworkError("ILIAS antwortet gerade nicht. Bitte später erneut versuchen.") from None
+        raise NetworkError("ILIAS ist nicht erreichbar. Bitte Internetverbindung prüfen.") from None
     except keyring.errors.KeyringError as e:
-        raise LoginError(f"Schlüsselbund nicht erreichbar ({type(e).__name__}).") from None
+        log.warning("Schlüsselbund Fehler: %s", type(e).__name__)
+        raise LoginError("Auf den Schlüsselbund kann gerade nicht zugegriffen werden.") from None
 
 
 class Api:

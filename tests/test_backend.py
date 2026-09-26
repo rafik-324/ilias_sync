@@ -271,12 +271,43 @@ def test_removed_and_redownload(env):
     assert api.removed_items() == []
 
 
-def test_first_sync_needs_empty_root(env):
-    api, base, passwords, _ = env
+def snapshot(path):
+    return sorted((str(p.relative_to(path)), p.stat().st_mtime_ns, p.is_dir()) for p in path.rglob("*"))
+
+
+def test_first_sync_into_existing_uni_folder_writes_nothing(env, monkeypatch):
+    """Lage auf dem Mac: base_dir zeigt auf den echten Uni Ordner mit eigenen Dateien, Index leer.
+    Der Sync muss abbrechen, bevor er ILIAS fragt oder irgendetwas schreibt."""
+    api, base, passwords, session = env
     setup_account(api, base, passwords)
-    (base / "01_Universität_Mannheim" / "01_SEMESTER").mkdir(parents=True)
-    with pytest.raises(ConfigError):
+    root = base / "01_Universität_Mannheim"
+    (root / "01_SEMESTER" / "01_marketing" / "01_Vorlesung").mkdir(parents=True)
+    (root / "01_SEMESTER" / "01_marketing" / "01_Vorlesung" / "01_Marketing_Vorlesungsskript.pdf").write_bytes(b"x")
+    (root / "code_projects").mkdir()
+    # Eine Vorschau vorher (legt nur den leeren Index im Datenverzeichnis an) ändert daran nichts
+    api.dry_run(noop, threading.Event())
+    before = snapshot(base)
+    config_before = api._config_path.read_bytes()
+
+    def no_login(*a, **kw):
+        raise AssertionError("darf ILIAS nicht fragen")
+
+    monkeypatch.setattr(api, "_logged_in_session", no_login)
+    with pytest.raises(ConfigError, match="leeren oder neuen Uni Ordner"):
         api.sync(noop, threading.Event())
+    assert snapshot(base) == before
+    assert api._config_path.read_bytes() == config_before
+    assert session.calls == []
+    assert api.last_run() is None
+
+
+@pytest.mark.parametrize("error", [requests.ConnectionError("x"), requests.Timeout(), requests.exceptions.SSLError()])
+def test_network_errors_are_readable(error):
+    with pytest.raises(NetworkError) as info:
+        with backend.translate_errors():
+            raise error
+    text = str(info.value)
+    assert "Error" not in text and "ILIAS" in text
 
 
 def test_dry_run_writes_nothing(env):
