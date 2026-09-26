@@ -227,7 +227,7 @@ def test_sync_downloads_and_reports(env, monkeypatch):
     assert [f.name for f in result.new_files] == ["skript.pdf"]
     path = result.new_files[0].local_path
     assert path.read_bytes() == b"v1"
-    assert path.is_relative_to(base / "01_Universität_Mannheim" / "01_SEMESTER")
+    assert path == base / "01_Universität_Mannheim" / "01_semester" / "01_marketing" / "01_vorlesung" / "skript.pdf"
     # Neuer Kursordner steht jetzt in der Config
     assert [c.ref_id for c in api.load_config().courses] == [100]
     assert api.last_run().new == 1

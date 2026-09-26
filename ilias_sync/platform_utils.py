@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import plistlib
+import re
 import subprocess
 import sys
 import unicodedata
@@ -40,6 +41,28 @@ def sanitize_name(name: str, replacement: str = "_") -> str:
     if name.split(".")[0].upper() in RESERVED_NAMES:
         name = replacement + name
     return name
+
+
+# Umlaute vor dem Entfernen von Akzenten ersetzen, sonst würde aus "ü" nur "u"
+TRANSLITERATION = (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss"))
+
+
+def linux_name(name: str) -> str:
+    """Name nach Linux Standard (Entscheidung des Nutzers 2026-09-26): nur Kleinbuchstaben,
+    Ziffern, "_", "-" und ".". Leerzeichen und andere Zeichen werden zu "_", Umlaute zu
+    ae/oe/ue/ss. "Ü1_MfN_Übungsskript Kernlösung.PDF" -> "ue1_mfn_uebungsskript_kernloesung.pdf".
+    Ein führender "_" bleibt (eigene Ordner wie _ohne_semester), ein führender Punkt oder
+    Bindestrich nicht (versteckte Dateien, Verwechslung mit Optionen)."""
+    name = nfc(name).lower()
+    for a, b in TRANSLITERATION:
+        name = name.replace(a, b)
+    name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
+    name = re.sub(r"[^a-z0-9._-]+", "_", name)
+    name = re.sub(r"_{2,}", "_", name)
+    name = re.sub(r"[_-]+\.", ".", name)        # "skript_(1).pdf" -> "skript_1.pdf"
+    name = re.sub(r"\.[_-]+", ".", name)
+    name = name.lstrip(".-").rstrip("._-")
+    return sanitize_name(name) if name else "_"
 
 
 def fit_path(path: Path, limit: int = MAX_PATH_LENGTH) -> Path:
