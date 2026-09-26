@@ -420,6 +420,8 @@ Entscheidung des Nutzers (2026-09-25): **Der erste echte Sync läuft in einen ko
 
 **Erster echter Sync erledigt (2026-09-25)**: Config `base_dir` = `C:\Users\rafik\OneDrive\Uni_neu` (alte Config gesichert als `config_vor_Uni_neu.toml` im Config Verzeichnis). 282 Dateien, 4,0 GB, 0 Fehler; zweiter Lauf: nichts zu tun. Die Kurszuordnungen `NN_kursname` stehen jetzt in der Config.
 
+**Erster echter Sync auf dem Mac erledigt (2026-09-26)**: `base_dir` = `~/Downloads/Uni_neu` (außerhalb von OneDrive, alte Config gesichert als `config_vor_Uni_neu.toml` im Config Verzeichnis). 283 Dateien, 4,1 GB, 0 Fehler, 8 Minuten; zweiter Lauf: nichts zu tun (60 s, nur Crawl). In OneDrive und im echten `01_SEMESTER` wurde nichts geschrieben. Auffällig, aber gewollt: Doppelpunkte in ILIAS Namen werden zu `_` (Windows), Videos in `NN_Videos` Unterordnern.
+
 Nächste Schritte Backend:
 * ~~Echte `api.Api`~~: fertig (2026-09-26, `backend.py`), alle Methoden aus GUI_KONTEXT.md 3.3, live gegen ILIAS getestet (Session, Kurse, Zuordnung). `python -m ilias_sync` ohne Argumente startet die App mit dem echten Backend. Autostart (`platform_utils`: LaunchAgent bzw. Registry) ist dabei
 * Als Nächstes: GUI mit echtem Backend durchspielen (Wizard, erster Sync in neuen Ordner auf dem Mac), dann Builds
