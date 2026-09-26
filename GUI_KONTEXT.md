@@ -141,6 +141,7 @@ class BaseDirCheck:
     has_root_folder: bool             # root_folder_name existiert schon darunter
     existing_semesters: list[str]     # z. B. ["01_SEMESTER"]
     message: str | None               # verständlicher Text bei Problemen
+    is_empty: bool = True             # Uni Ordner fehlt oder ist leer (Voraussetzung für den ersten Sync)
 
 @dataclass
 class PlannedAction:
@@ -246,6 +247,8 @@ class Api:
     # Sync
     def dry_run(self, progress: ProgressCallback, cancel: threading.Event) -> list[PlannedAction]: ...
     def sync(self, progress: ProgressCallback, cancel: threading.Event) -> SyncResult: ...
+        # Erster Sync (Index für diesen Uni Ordner leer) in einen Uni Ordner mit Inhalt: ConfigError.
+        # Ein noch nicht vorhandener Uni Ordner ist in Ordnung. Der Index ist pro Uni Ordner getrennt
     def redownload(self, ref_id: int) -> DownloadedFile: ...   # "Erneut herunterladen"
     def download_changed(self, ref_id: int) -> DownloadedFile: ...
         # neue ILIAS Version als <name>_ilias_<YYYY-MM-DD>.<ext> neben die vorhandene Datei, nie überschreiben
@@ -331,7 +334,7 @@ Klein und übersichtlich, Startgröße etwa 800 × 560, Größe und Position wer
 * Button **Regeln bearbeiten** pro Kurs: Dialog mit Liste der `CourseRule`s (Typ Ordner oder Datei, Glob Muster, Zielordner), Reihenfolge per Hoch/Runter änderbar ("erste passende gewinnt"), Hinzufügen, Entfernen
 * Button **Kurse aktualisieren** (`fetch_courses` im Worker)
 * Änderungen werden mit **Speichern** übernommen (`save_config`), ungespeicherte Änderungen beim Tab Wechsel oder Schließen nachfragen
-* Semester Zuordnung (`semesters`) als kleine Tabelle darunter oder in eigenem Dialog: "HWS 2026" → `01_SEMESTER`
+* Die Semester Zuordnung steht nicht hier, sondern in den Einstellungen (Entscheidung des Nutzers, 25.09.2026)
 
 ### 6.3 Vorschau
 * Button **Vorschau erstellen** (`dry_run` im Worker, mit Fortschritt und Abbrechen)
@@ -341,11 +344,13 @@ Klein und übersichtlich, Startgröße etwa 800 × 560, Größe und Position wer
 * Button **Jetzt so synchronisieren** startet den echten Sync
 
 ### 6.4 Einstellungen
-* **Basisordner**: Anzeige plus "Ändern ..." (nativer Ordnerdialog `QFileDialog.getExistingDirectory`). Vor dem Übernehmen Warnung: "Vorhandene Dateien werden nicht verschoben. Neue Downloads landen im neuen Ordner." Danach `check_base_dir`
+* Button **Jetzt synchronisieren** oben rechts (wie in der Übersicht, deaktiviert während eines Syncs, bei Login nötig öffnet er den Login Dialog). Ungespeicherte Einstellungen vorher speichern oder verwerfen lassen, denn der Sync nutzt die gespeicherte Config
+* **Basisordner**: Anzeige plus "Ändern ..." (nativer Ordnerdialog `QFileDialog.getExistingDirectory`). Vor dem Übernehmen Warnung: "Vorhandene Dateien werden nicht verschoben. Neue Downloads landen im neuen Ordner." Danach `check_base_dir`. Ist `is_empty` falsch, zusätzlich warnen: der erste Sync in einen fremden Uni Ordner mit Inhalt wird verweigert
 * **Name des Uni Ordners** (`root_folder_name`)
 * **Intervall** in Minuten (`QSpinBox`, 15 bis 1440)
 * **Parallelität** (`QSpinBox`, 1 bis 5, Standard 3)
 * **Semester Muster** (Regex, mit Prüfung auf Gültigkeit vor dem Speichern)
+* **Semester Ordner** (`semesters`): kleine Tabelle "HWS 2026" → `01_SEMESTER`. Semester aus Kursnamen ohne Ordner erscheinen als leere Zeile (wird beim Sync mit der nächsten Nummer angelegt)
 * **Ignorierte lokale Ordner** (Liste mit Hinzufügen / Entfernen, Glob Muster)
 * **Autostart** Checkbox (`set_autostart`)
 * **Konto**: angezeigte Uni-ID, Button **Abmelden** mit Bestätigung ("Passwort und Session werden von diesem Gerät entfernt. Heruntergeladene Dateien bleiben erhalten.")
@@ -361,8 +366,8 @@ Klein und übersichtlich, Startgröße etwa 800 × 560, Größe und Position wer
 `QWizard`, startet automatisch, wenn `config_exists()` falsch ist oder `base_dir` fehlt. Abbrechen beendet die App nach Rückfrage (ohne Setup gibt es nichts zu tun).
 
 1. **Anmelden**: Uni-ID, Passwort, Checkbox "Passwort im Schlüsselbund speichern" (Standard an). Button "Anmelden testen" (`login` im Worker). Weiter erst nach Erfolg. Fehlertexte: falsches Passwort, Netzwerkproblem, sonstiges
-2. **Basisordner**: Eingabefeld plus **Durchsuchen**. Vorschlag: Ordner über dem erkannten `01_Universität_Mannheim`, sonst leer. Live Prüfung mit `check_base_dir` (existiert, beschreibbar, gefundene Semester). Fehlende Ordner nach Bestätigung anlegen (`create_base_structure`). Vorschau der künftigen Struktur als kurzer Text Baum
-3. **Kurse zuordnen**: `fetch_courses` (Worker), dann `suggest_mapping`. Tabelle wie Tab Kurse. Vorhandene Ordner mit Score anzeigen, unsichere Treffer (Score unter 0,7) markieren. Leerer Basisordner: vorgeschlagene neue Struktur anzeigen. Nutzer bestätigt oder korrigiert
+2. **Basisordner**: Eingabefeld plus **Durchsuchen**, kein automatischer Vorschlag. Der erste echte Sync läuft in einen **neuen, leeren** Uni Ordner (Entscheidung des Nutzers): Weiter nur, wenn `check_base_dir(...).is_empty`, sonst verständlicher Hinweis, einen anderen Ordner zu wählen. Live Prüfung mit `check_base_dir` (existiert, beschreibbar, leer). Fehlende Ordner nach Bestätigung anlegen (`create_base_structure`). Vorschau der künftigen Struktur als kurzer Text Baum
+3. **Kurse zuordnen**: `fetch_courses` und `suggest_mapping` im Worker. Das Backend schlägt für den leeren Uni Ordner `NN_kursname` Ordner vor, Kurse derselben Veranstaltung ([V]/[Ü]/[T]) im selben Ordner. Vorhandene Ordner mit Score anzeigen, unsichere Treffer (Score unter 0,7) markieren. Nutzer bestätigt oder korrigiert
 4. **Vorschau**: `dry_run` (Worker), Baum wie Tab Vorschau
 5. **Erster Sync**: Hinweis auf Datenmenge, Button **Synchronisierung starten**. Nach Start schließt der Wizard, Fortschritt im Tray und im Fenster
 
@@ -424,5 +429,5 @@ Implementiert jede Methode aus 3.3 mit realistischen Daten, damit sich alle Scre
 ## 14. Offene Punkte (mit dem Nutzer klären, nicht raten)
 
 * Finale Icons (Gestaltung, Farben)
-* Ob die Semester Zuordnung im Tab Kurse oder in den Einstellungen besser aufgehoben ist
-* Ob Videos wegen der Datenmenge im Wizard standardmäßig abgewählt werden sollen (laut `CLAUDE.md` ist Standard: alles an)
+
+Geklärt am 25.09.2026: Semester Zuordnung in den Einstellungen. Videos bleiben im Wizard standardmäßig an. Einstellungen bekommen einen Button "Jetzt synchronisieren". Erster Sync nur in einen leeren Uni Ordner.

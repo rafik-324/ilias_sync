@@ -68,33 +68,16 @@ def test_test_target_must_not_be_inside_semester(tmp_path):
     assert "01_SEMESTER" in cli.check_test_target(root / "01_SEMESTER" / "01_marketing" / "x", root)
 
 
-def test_format_plan_summary_and_details(tmp_path):
-    from datetime import datetime
+def test_first_sync_refuses_non_empty_root_before_login(monkeypatch, tmp_path, capsys):
+    root = tmp_path / "Uni"
+    (root / "01_SEMESTER").mkdir(parents=True)
+    monkeypatch.setattr(cli, "load_config_or_report", lambda: Config(base_dir=tmp_path, root_folder_name="Uni"))
+    monkeypatch.setattr(config, "data_dir", lambda: tmp_path / "daten")
 
-    from ilias_sync import sync
-    from ilias_sync.crawler import Course, IliasObject
-    from ilias_sync.mapper import MappedItem
+    def no_login(cfg):
+        raise AssertionError("kein Login, wenn der Ordner nicht passt")
 
-    course = Course("crs", 1, "Marketing [V] (HWS 2026)", "u", "HWS 2026", "HWS 2026")
-
-    def action(kind, name, size=None, mtime=None, new_dirs=None, modified=False):
-        obj = IliasObject("file", 1, name, "u", [course.name], size, mtime)
-        rel = ("01_SEMESTER", "01_marketing", name)
-        item = MappedItem(obj, course, rel, None, True, new_dirs or set())
-        return sync.FileAction(kind, item, tmp_path.joinpath(*rel), user_modified=modified)
-
-    actions = [
-        action(sync.Kind.NEW, "neu.pdf", size=2048, new_dirs={("01_SEMESTER",)}),
-        action(sync.Kind.CHANGED, "geaendert.pdf", mtime=datetime(2026, 10, 3, 9, 5), modified=True),
-        action(sync.Kind.UNCHANGED, "alt.pdf"),
-    ]
-    lines = cli.format_plan(actions, tmp_path)
-    text = "\n".join(lines)
-    assert "Neu laden: 1 (2.0 KB)" in text
-    assert "In ILIAS geändert (wird nur gemeldet, nicht geladen): 1" in text
-    assert "Unverändert: 1" in text
-    assert "Davon von dir bearbeitet (bleiben unangetastet): 1" in text
-    assert "  01_SEMESTER/01_marketing/neu.pdf   2.0 KB   (neuer Ordner)" in lines
-    assert "  01_SEMESTER/01_marketing/geaendert.pdf   neu in ILIAS: 03.10.2026 09:05" in lines
-    assert "alt.pdf" not in text
-    assert cli.format_plan(actions, tmp_path, details=False) == lines[: len(cli.format_plan(actions, tmp_path, False))]
+    monkeypatch.setattr(cli, "open_session", no_login)
+    for dry_run in (True, False):
+        assert cli.cmd_sync(dry_run, None) == 1
+        assert "leeren" in capsys.readouterr().out

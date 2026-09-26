@@ -122,23 +122,3 @@ def test_fit_path_shortens_stem_keeps_suffix():
     assert len(str(fitted)) <= 100
     assert fitted.suffix == ".pdf"
     assert fit_path(Path("C:/x/kurz.pdf"), limit=100) == Path("C:/x/kurz.pdf")
-
-
-def test_hash_of_downloaded_file(tmp_path):
-    target = tmp_path / "datei.pdf"
-    result = downloader.download_file(FakeSession(response(b"abc")), "u", target)
-    assert result.sha256 == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-
-
-def test_versioned_path(tmp_path):
-    from datetime import date
-
-    existing = tmp_path / "Skript.pdf"
-    existing.write_bytes(b"x")
-    first = downloader.versioned_path(existing, date(2026, 10, 3))
-    assert first.name == "Skript_ilias_2026-10-03.pdf"
-    first.write_bytes(b"y")
-    assert downloader.versioned_path(existing, date(2026, 10, 3)).name == "Skript_ilias_2026-10-03_2.pdf"
-    # Auch ein laufender Download (.part) belegt den Namen
-    downloader.part_path(tmp_path / "Skript_ilias_2026-10-03_2.pdf").write_bytes(b"")
-    assert downloader.versioned_path(existing, date(2026, 10, 3)).name == "Skript_ilias_2026-10-03_3.pdf"

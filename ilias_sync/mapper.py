@@ -11,6 +11,8 @@ Regeln laut CLAUDE.md Abschnitt "Mapping":
             wie "Dateien" übersprungen), sonst Kürzel des Kurses, sonst Gruppenname
   Ordner    vorhandene lokale Ordner werden wiederverwendet (Vergleich ohne
             Nummernpräfix, ohne Groß/Kleinschreibung, Umlaute normalisiert)
+  Videos    in einen Unterordner NN_Videos des Ordners, in dem sie sonst lägen,
+            außer ein übernommener ILIAS Ordner auf dem Weg ist schon ein Video Ordner
 
 Der Mapper liest das lokale Dateisystem nur (Ordnernamen), er legt nichts an.
 """
@@ -31,6 +33,10 @@ from .platform_utils import nfc, sanitize_name
 log = logging.getLogger(__name__)
 
 NEW_COURSES_DIR = "_Neue_Kurse"
+VIDEO_DIR = "Videos"
+VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".mkv", ".webm", ".avi", ".wmv"}
+# Ordnernamen, die schon Video Ordner sind (Wortteil, nach fold)
+VIDEO_FOLDER_WORDS = ("video", "aufzeichnung", "recording", "screencast")
 NO_SEMESTER_DIR = "_Ohne_Semester"
 
 # Kategorien in Tabellenreihenfolge: (Name, Schlüsselwörter)
@@ -49,7 +55,10 @@ CATEGORY_LOCAL_NAMES = {
     "Übungsblätter": ["übungsblätter", "übungsblatt"],
     "Abgaben": ["abgaben", "abgabe"],
 }
-COURSE_SUFFIX_CATEGORIES = {"v": "Vorlesung", "ü": "Übung", "ue": "Übung", "t": "Tutorium"}
+# Reihenfolge der Nummern neuer Kategorieordner. Übungsblätter direkt nach Übung,
+# weil sie ohne eigenen lokalen Ordner in den Übungsordner fallen
+CATEGORY_NUMBER_ORDER = ["Vorlesung", "Übung", "Übungsblätter", "Tutorium", "Abgaben"]
+COURSE_SUFFIX_CATEGORIES ={"v": "Vorlesung", "ü": "Übung", "ue": "Übung", "t": "Tutorium"}
 # Allgemeine Sammelordner, zählen bei der Kategorieerkennung nicht als Ebene
 TRANSPARENT_FOLDERS = {"dateien", "files", "materialien", "material", "unterlagen"}
 # Füllwörter, die einen Ordner nicht von seiner Kategorie unterscheiden
@@ -96,6 +105,14 @@ def loose_folder_key(name: str) -> frozenset[str]:
 def number_prefix(name: str) -> int | None:
     m = re.match(r"^(\d{1,3})_", name)
     return int(m.group(1)) if m else None
+
+
+def is_video_name(name: str) -> bool:
+    return Path(name).suffix.lower() in VIDEO_SUFFIXES
+
+
+def is_video_folder(name: str) -> bool:
+    return any(v in w for w in words(name) for v in VIDEO_FOLDER_WORDS)
 
 
 def is_ignored(name: str, patterns: list[str]) -> bool:
@@ -188,6 +205,21 @@ def best_course_dir(ilias_name: str, local_dirs: list[str], semester_pattern: st
     if not scored:
         return None, 0.0
     return max(scored)[1], 1.0
+
+
+def course_dir_name(ilias_name: str, semester_pattern: str) -> str:
+    """Ordnername ohne Nummer für einen neuen Kurs: "Praktische Informatik I [V] (HWS 2026)"
+    -> "praktische_informatik_i". Gleiche Kürzungen wie beim Fuzzy Match."""
+    name = re.sub(semester_pattern, " ", ilias_name)
+    name = re.sub(r"\[[^\]]*\]", " ", name)
+    name = re.sub(r"(,\s*)?\b(gro(ß|ss)e|kleine)\s+(Übung|Uebung)\b", " ", name, flags=re.IGNORECASE)
+    name = re.sub(r"\s-\s*Tut\b.*$", " ", name, flags=re.IGNORECASE)
+    # Kurz halten: Untertitel nach ":" und Modulkürzel wie "IS 201" am Anfang weglassen
+    name = name.split(":", 1)[0]
+    name = re.sub(r"^\s*[A-Z]{2,5}\s?\d{2,4}[a-z]?\s+", " ", name)
+    name = re.sub(r"[,;:!?()\[\]{}'\"]", " ", nfc(name)).lower()
+    name = re.sub(r"\s+", "_", sanitize_name(name).strip()).strip("._-")
+    return name or "kurs"
 
 
 # ---------------- Semester ----------------
@@ -352,6 +384,22 @@ class Mapper:
         self._resolved[cache_key] = name
         return name
 
+    def resolve_video_dir(self, parent: tuple[str, ...]) -> str:
+        """Unterordner für Videos: vorhandenen Video Ordner nutzen, sonst NN_Videos mit
+        der nächsten freien Nummer unter den Geschwistern."""
+        cache_key = (parent, "\0videos")
+        if cache_key in self._resolved:
+            return self._resolved[cache_key]
+        existing = [d for d in self.tree.subdirs(parent) if " ".join(words(strip_number_prefix(d))) in ("video", "videos")]
+        if existing:
+            name = existing[0]
+        else:
+            siblings = [*self.tree.subdirs(parent, include_ignored=True), *self._planned.get(parent, [])]
+            numbers = [n for n in (number_prefix(d) for d in siblings) if n is not None]
+            name = self._plan(parent, f"{max(numbers, default=0) + 1:02d}_{VIDEO_DIR}")
+        self._resolved[cache_key] = name
+        return name
+
     # ---------- Kurse ----------
 
     def map_course(self, course: Course, semester_dirs: dict[str, str]) -> CourseMapping:
@@ -371,15 +419,49 @@ class Mapper:
         return CourseMapping(course, semester, semester_dir, f"{NEW_COURSES_DIR}/{sanitize_name(course.name)}",
                              False, "neu")
 
+    def semester_dirs(self, result: CrawlResult) -> dict[str, str]:
+        found = {s for c in result.courses if (s := course_semester(c))}
+        existing = [d for d in self.tree.subdirs(()) if SEMESTER_DIR_RE.match(d)]
+        return assign_semesters(sorted(found), dict(self.cfg.semesters), existing)
+
+    def suggest_courses(self, result: CrawlResult) -> list[CourseConfig]:
+        """Neue Kursordner NN_kursname für Kurse ohne Config Eintrag und ohne passenden
+        vorhandenen Ordner. Kurse derselben Veranstaltung ([V], [Ü], [T], Tut Gruppe)
+        bekommen denselben Ordner. Nummern fortlaufend nach vorhandenen Ordnern, in der
+        Reihenfolge des Dashboards. Schreibt nichts, der Aufrufer speichert in der Config."""
+        semester_dirs = self.semester_dirs(result)
+        courses = [c for c in result.courses if c.ref_id not in result.nested_in]
+        mappings = [self.map_course(c, semester_dirs) for c in courses]
+        # Belegte Namen je Semesterordner: vorhandene Ordner und Kurse aus der Config
+        used: dict[str, list[str]] = {}
+        for cm in mappings:
+            names = used.setdefault(cm.semester_dir, list(self.tree.subdirs((cm.semester_dir,), include_ignored=True)))
+            if cm.source == "config":
+                names.append(cm.course_dir)
+
+        planned: dict[tuple[str, tuple[str, ...]], str] = {}   # (Semesterordner, Kurswörter) -> Ordner
+        suggestions: list[CourseConfig] = []
+        for course, cm in zip(courses, mappings):
+            if cm.source != "neu":
+                continue
+            key = (cm.semester_dir, tuple(ilias_course_words(course.name, self.cfg.semester_pattern)))
+            if key not in planned:
+                names = used[cm.semester_dir]
+                numbers = [n for n in (number_prefix(d) for d in names) if n is not None]
+                name = f"{max(numbers, default=0) + 1:02d}_{course_dir_name(course.name, self.cfg.semester_pattern)}"
+                names.append(name)
+                planned[key] = name
+            suggestions.append(CourseConfig(ref_id=course.ref_id, ilias_name=course.name, local_dir=planned[key]))
+        return suggestions
+
     # ---------- Objekte ----------
 
     def map_crawl(self, result: CrawlResult) -> MappingResult:
-        found = {s for c in result.courses if (s := course_semester(c))}
-        existing = [d for d in self.tree.subdirs(()) if SEMESTER_DIR_RE.match(d)]
-        semester_dirs = assign_semesters(sorted(found), dict(self.cfg.semesters), existing)
+        semester_dirs = self.semester_dirs(result)
 
-        items: list[MappedItem] = []
+        # 1. Alle Objekte mit ihren ILIAS Ordnern sammeln
         mappings: list[CourseMapping] = []
+        work: list[tuple[IliasObject, Course, CourseMapping, tuple[str, ...], list[IliasObject]]] = []
         for course in result.courses:
             if course.ref_id in result.nested_in:
                 continue
@@ -393,7 +475,27 @@ class Mapper:
                 if obj.is_container:
                     stack.append(obj)
                     continue
-                items.append(self._map_object(obj, course, cm, course_rel, list(stack)))
+                work.append((obj, course, cm, course_rel, list(stack)))
+
+        # 2. Neue Kategorieordner in fester Reihenfolge nummerieren (01_Vorlesung, 02_Übung,
+        #    03_Tutorium ...), nicht in der Reihenfolge, in der ILIAS die Dateien liefert.
+        #    Mehrere ILIAS Kurse im selben Kursordner zählen zusammen. Nur Dateien zählen.
+        needed: dict[tuple[str, ...], set[str]] = {}
+        for obj, course, cm, course_rel, ancestors in work:
+            if obj.type != "file" or cm.source in ("neu", "ohne Semester"):
+                continue
+            if self._rule_target(course, obj, ancestors):
+                continue
+            category, _ = self._category_and_rest(course, ancestors)
+            if category:
+                needed.setdefault(course_rel, set()).add(category)
+        for course_rel, categories in needed.items():
+            for category in sorted(categories, key=CATEGORY_NUMBER_ORDER.index):
+                self.resolve_category(course_rel, category)
+
+        # 3. Zielpfade
+        items = [self._map_object(obj, course, cm, course_rel, ancestors)
+                 for obj, course, cm, course_rel, ancestors in work]
         return MappingResult(items=items, courses=mappings, semesters=semester_dirs)
 
     def _category_and_rest(self, course: Course, ancestors: list[IliasObject]) -> tuple[str | None, list[str]]:
@@ -445,6 +547,8 @@ class Mapper:
                     rel = note(rel, self.resolve_category(rel, category))
         for name in rest:
             rel = note(rel, self.resolve_folder(rel, name))
+        if obj.type == "file" and is_video_name(obj.name) and not any(is_video_folder(n) for n in rest):
+            rel = note(rel, self.resolve_video_dir(rel))
         return MappedItem(obj, course, (*rel, sanitize_name(obj.name)), category, cm.exists, new_dirs)
 
     def _rule_target(self, course: Course, obj: IliasObject, ancestors: list[IliasObject]) -> str | None:

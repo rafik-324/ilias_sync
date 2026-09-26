@@ -173,19 +173,26 @@ def test_validate_settings_errors(kw, fragment):
     assert any(fragment in e for e in errors), errors
 
 
-def test_find_existing_base(tmp_path):
-    (tmp_path / "OneDrive" / "01_Universität_Mannheim").mkdir(parents=True)
-    assert logic.find_existing_base("01_Universität_Mannheim", tmp_path) == tmp_path / "OneDrive"
+@pytest.mark.parametrize(
+    "name, expected",
+    [
+        ("Marketing (HWS 2026)", "HWS 2026"),
+        ("Statistik I [V] (FSS 2027)", "FSS 2027"),
+        ("MSDNAA Lizenzkurs", None),
+    ],
+)
+def test_semester_of(name, expected):
+    assert logic.semester_of(name, r"\((HWS|FSS) (\d{4})\)") == expected
 
 
-def test_find_existing_base_nfd(tmp_path):
-    # macOS liefert Dateinamen in NFD, der Vergleich muss trotzdem passen
-    (tmp_path / "Documents" / "01_Universität_Mannheim").mkdir(parents=True)
-    assert logic.find_existing_base("01_Universität_Mannheim", tmp_path) == tmp_path / "Documents"
+def test_semester_rows_ergaenzt_fehlende():
+    from ilias_sync.api import CourseConfig
 
-
-def test_find_existing_base_none(tmp_path):
-    assert logic.find_existing_base("01_Universität_Mannheim", tmp_path) is None
+    cfg = Config(base_dir=Path("x"), semesters={"HWS 2026": "01_SEMESTER"}, courses=[
+        CourseConfig(1, "Marketing (HWS 2026)", "01_marketing"),
+        CourseConfig(2, "Statistik I (FSS 2027)", None),
+    ])
+    assert logic.semester_rows(cfg) == [("HWS 2026", "01_SEMESTER"), ("FSS 2027", "")]
 
 
 def test_next_due():

@@ -18,7 +18,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from . import auth, config, crawler, downloader, mapper, state, sync
-from .api import Config, ConfigError
+from .api import ActionKind, Config, ConfigError
 
 log = logging.getLogger(config.APP_NAME)
 
@@ -231,8 +231,7 @@ def format_crawl(result: crawler.CrawlResult) -> list[str]:
 
 # ---------------- Test Sync: echte Downloads in einen Testordner ----------------
 
-def is_video(item: mapper.MappedItem) -> bool:
-    return sync.is_video(item.obj.name)
+is_video = sync.is_video
 
 
 def check_test_target(target: Path, real_root: Path) -> str | None:
@@ -280,29 +279,21 @@ def format_preview(mapping: mapper.MappingResult, skipped_videos: set[int]) -> l
     others = Counter(crawler.TYPE_NAMES.get(it.obj.type) or it.obj.type_label or it.obj.type
                      for it in mapping.items if it.obj.type != "file")
     if others:
-        lines += ["", "Noch nicht behandelt (kommt mit Meilenstein 5): "
+        lines += ["", "Werden nicht geladen (nur Dateien): "
                   + ", ".join(f"{n} {label}" for label, n in others.most_common())]
     return lines
-
-
-def real_root_or_report(cfg: Config) -> Path | None:
-    """Uni Ordner (base_dir / root_folder_name), None mit Meldung, wenn er fehlt."""
-    if cfg.base_dir is None:
-        print("FEHLER: In der Config fehlt general.base_dir (Basispfad).")
-        return None
-    real_root = cfg.base_dir / cfg.root_folder_name
-    if not real_root.is_dir():
-        print("FEHLER: Uni Ordner nicht gefunden:", real_root)
-        return None
-    return real_root
 
 
 def cmd_test_sync(target: Path, with_videos: bool) -> int:
     cfg = load_config_or_report()
     if cfg is None:
         return 1
-    real_root = real_root_or_report(cfg)
-    if real_root is None:
+    if cfg.base_dir is None:
+        print("FEHLER: In der Config fehlt general.base_dir (Basispfad).")
+        return 1
+    real_root = cfg.base_dir / cfg.root_folder_name
+    if not real_root.is_dir():
+        print("FEHLER: Uni Ordner nicht gefunden:", real_root)
         return 1
     if problem := check_test_target(target, real_root):
         print("FEHLER:", problem)
@@ -369,141 +360,106 @@ def cmd_test_sync(target: Path, with_videos: bool) -> int:
     return 0 if not errors else 2
 
 
-# ---------------- Dry Run und Sync ----------------
 
-PLAN_LABELS = {
-    sync.Kind.NEW: "Neu laden",
-    sync.Kind.ADOPT: "Schon vorhanden, nur in den Index übernehmen",
-    sync.Kind.CHANGED: "In ILIAS geändert (wird nur gemeldet, nicht geladen)",
-    sync.Kind.REMOVED: "Von dir verschoben oder gelöscht (wird nicht erneut geladen)",
-    sync.Kind.UNCHANGED: "Unverändert",
-    sync.Kind.DISABLED: "In den Kurs Einstellungen abgeschaltet",
+# ---------------- Echter Sync und Dry Run ----------------
+
+KIND_LABELS = {
+    ActionKind.NEW: "NEU",
+    ActionKind.UPDATE: "AKTUALISIERT",
+    ActionKind.CONFLICT: "KONFLIKT",
+    ActionKind.SKIP_REMOVED: "ENTFERNT",
 }
 
 
-def format_plan(actions: list[sync.FileAction], root: Path, details: bool = True) -> list[str]:
-    """Zusammenfassung und Liste der Aktionen eines Plans."""
-    by_kind: dict[sync.Kind, list[sync.FileAction]] = {k: [] for k in sync.Kind}
-    for a in actions:
-        by_kind[a.kind].append(a)
-    new_size = sum(a.item.obj.size or 0 for a in by_kind[sync.Kind.NEW])
-    lines = ["Zusammenfassung"]
-    for kind, label in PLAN_LABELS.items():
-        extra = f" ({format_size(new_size)})" if kind == sync.Kind.NEW and new_size else ""
-        lines.append(f"  {label}: {len(by_kind[kind])}{extra}")
-    modified = sum(a.user_modified for a in actions)
-    if modified:
-        lines.append(f"  Davon von dir bearbeitet (bleiben unangetastet): {modified}")
-    if not details:
-        return lines
-
-    def rel(path: Path) -> str:
-        try:
-            return path.relative_to(root).as_posix()
-        except ValueError:
-            return str(path)
-
-    for kind in (sync.Kind.NEW, sync.Kind.CHANGED, sync.Kind.ADOPT, sync.Kind.REMOVED):
-        if not by_kind[kind]:
+def format_plan(jobs: list[sync.Job], root: Path, suggestions: list, unassigned: list) -> list[str]:
+    lines = []
+    if suggestions:
+        lines += ["Neue Kursordner (werden in der Config gespeichert):"]
+        for c in suggestions:
+            lines += [f"  {c.ilias_name}", f"      -> {c.local_dir}"]
+        lines.append("")
+    if unassigned:
+        lines += ["Kurse ohne Zuordnung (landen in _Neue_Kurse):"]
+        lines += [f"  {cm.course.name}" for cm in unassigned]
+        lines.append("")
+    for kind, label in KIND_LABELS.items():
+        selected = [j for j in jobs if j.kind == kind]
+        if not selected:
             continue
-        lines += ["", PLAN_LABELS[kind] + ":"]
-        for a in sorted(by_kind[kind], key=lambda a: rel(a.target)):
-            line = f"  {rel(a.target)}"
-            if kind == sync.Kind.NEW:
-                line += f"   {format_size(a.item.obj.size)}"
-                if a.item.new_dirs:
-                    line += "   (neuer Ordner)"
-            elif kind == sync.Kind.CHANGED and a.item.obj.mtime:
-                line += f"   neu in ILIAS: {a.item.obj.mtime:%d.%m.%Y %H:%M}"
-            lines.append(line)
+        size = sum(j.item.obj.size or 0 for j in selected)
+        lines.append(f"{label}: {len(selected)} Dateien" + (f", etwa {format_size(size)}" if size else ""))
+        lines += [f"  {j.target.relative_to(root).as_posix()}" for j in sorted(selected, key=lambda j: j.target)]
+        lines.append("")
+    if not jobs:
+        lines.append("Nichts zu tun, alles aktuell.")
     return lines
 
 
-def prepare_sync(course_ids: list[int]) -> tuple | None:
-    """Config, Session, Crawl, Mapping und Plan. None bei Fehler (bereits gemeldet)."""
+def cmd_sync(dry_run: bool, output: Path | None) -> int:
     cfg = load_config_or_report()
     if cfg is None:
-        return None
-    root = real_root_or_report(cfg)
-    if root is None:
-        return None
-    s = open_session(cfg)
-    if s is None:
-        return None
-    result = run_crawl(cfg, s, course_ids)
-    if result is None:
-        return None
-    mapping = mapper.Mapper(cfg, root).map_crawl(result)
-    st = state.State()
-    actions = sync.plan(mapping, st, root, cfg)
-    if result.failed:
-        print(f"Hinweis: {len(result.failed)} ILIAS Seiten konnten nicht gelesen werden, deren Inhalt fehlt im Plan.")
-    return cfg, s, root, st, actions
-
-
-def cmd_dry_run(course_ids: list[int], output: Path | None) -> int:
-    print("Dry Run: zeigt, was ein Sync tun würde. Es wird nichts heruntergeladen oder in deine Ordner geschrieben")
-    prepared = prepare_sync(course_ids)
-    if prepared is None:
         return 1
-    _, _, root, st, actions = prepared
-    st.close()
-    lines = format_plan(actions, root)
-    print("\n".join(lines))
-    if output:
-        output.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        print("Ausgabe gespeichert in:", output)
-    return 0
-
-
-def cmd_sync(course_ids: list[int], assume_yes: bool) -> int:
-    prepared = prepare_sync(course_ids)
-    if prepared is None:
+    if cfg.base_dir is None:
+        print("FEHLER: In der Config fehlt general.base_dir (Basispfad).")
         return 1
-    cfg, s, root, st, actions = prepared
-    with st:
-        print("\n".join(format_plan(actions, root, details=False)))
-        print("Ziel:", root)
-        if not assume_yes and input("Sync jetzt ausführen? [j/N] ").strip().lower() != "j":
-            print("Abgebrochen, nichts geändert.")
+    root = cfg.base_dir / cfg.root_folder_name
+    with state.State(state.db_file(config.data_dir(), root)) as st:
+        if problem := sync.check_first_sync(st, root):
+            print("FEHLER:", problem)
+            return 1
+        s = open_session(cfg)
+        if s is None:
+            return 1
+        print(("Dry Run, es wird nichts geschrieben: " if dry_run else "Sync nach: ") + str(root))
+        started = time.monotonic()
+        result = run_crawl(cfg, s, [])
+        if result is None:
             return 1
 
+        suggestions = mapper.Mapper(cfg, root).suggest_courses(result)
+        cfg.courses += suggestions
+        if suggestions and not dry_run:
+            config.save_config(cfg)
+        mapping = mapper.Mapper(cfg, root).map_crawl(result)
+        problems: list[str] = []
+        jobs = sync.plan(mapping, st, root, cfg, problems)
+        lines = format_plan(jobs, root, suggestions, sync.unassigned_courses(mapping))
+        if problems:
+            lines.append(f"NICHT MÖGLICH: {len(problems)} Dateien, bitte kürzeren Basisordner wählen")
+            lines += [f"  {p}" for p in problems]
+        if result.failed:
+            lines.append(f"Nicht gelesene ILIAS Seiten: {', '.join(result.failed)}")
+        print("\n".join(lines))
+        if output:
+            output.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            print("Ausgabe gespeichert in:", output)
+        if dry_run:
+            return 0
+
+        throttle = crawler.Throttle(crawler.DEFAULT_DELAY)
         relogin_lock = threading.Lock()
 
         def relogin() -> None:
             with relogin_lock:
                 auth.relogin(s, lambda: console_credentials(cfg))
 
-        cancel = threading.Event()
-        started = time.monotonic()
+        def progress(p) -> None:
+            progress_line(f"Dateien: {p.current}/{p.total}")
+
         try:
-            summary = sync.execute(
-                actions, s, st, root,
-                max_parallel=cfg.max_parallel,
-                throttle=crawler.Throttle(crawler.DEFAULT_DELAY),
-                relogin=relogin,
-                progress=lambda p: progress_line(f"Dateien: {p.current}/{p.total}"),
-                cancel=cancel,
-            )
+            sync_result, _ = sync.execute(jobs, mapping, s, st, root, cfg.max_parallel, progress,
+                                          relogin=relogin, throttle=throttle)
         except KeyboardInterrupt:
-            cancel.set()
-            print("\nAbgebrochen. Bereits geladene Dateien bleiben, .part Dateien werden entfernt.")
+            print("\nAbgebrochen. Geladene Dateien bleiben und stehen im Index, .part Dateien werden entfernt.")
             return 1
         if sys.stderr.isatty():
             print(file=sys.stderr)
-
-    lines = [
-        f"Sync fertig in {time.monotonic() - started:.0f} s: {len(summary.new)} neu geladen, "
-        f"{summary.adopted} vorhandene übernommen, {len(summary.errors)} Fehler",
-    ]
-    if summary.changed:
-        lines.append(f"{len(summary.changed)} Dateien wurden in ILIAS geändert (nicht geladen):")
-        lines += [f"  {i.local_path}" for i in summary.changed]
-    if summary.removed:
-        lines.append(f"{summary.removed} Dateien hast du verschoben oder gelöscht, sie werden nicht erneut geladen")
-    lines += [f"  FEHLER {e}" for e in summary.errors]
-    print("\n".join(lines))
-    return 0 if not summary.errors else 2
+        run = sync_result.run
+        print(f"Sync fertig in {time.monotonic() - started:.0f} s: {run.new} neu, {run.updated} aktualisiert, "
+              f"{run.errors} Fehler")
+        for e in sync_result.errors:
+            print("  FEHLER", e)
+        return 0 if not sync_result.errors else 2
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -515,11 +471,10 @@ def main(argv: list[str] | None = None) -> int:
                        help="Testlauf: alle Kurse, Ordner und Dateien auflisten, nichts herunterladen")
     group.add_argument("--test-sync", type=Path, metavar="ZIELORDNER",
                        help="Test: Dateien einsortiert in ZIELORDNER laden, echte Uni Ordner nur lesen")
-    group.add_argument("--dry-run", action="store_true",
-                       help="zeigen, was ein Sync tun würde, ohne etwas zu laden oder zu schreiben")
-    group.add_argument("--sync", action="store_true", help="synchronisieren: neue Dateien in den Uni Ordner laden")
+    group.add_argument("--dry-run", action="store_true", help="zeigen, was ein Sync tun würde, nichts schreiben")
+    group.add_argument("--sync", action="store_true",
+                       help="echter Sync in den Uni Ordner aus der Config (erster Sync nur in leeren Ordner)")
     parser.add_argument("--videos", action="store_true", help="beim Test Sync auch Videos laden")
-    parser.add_argument("-y", "--yes", action="store_true", help="beim Sync nicht nachfragen")
     parser.add_argument("--course", type=int, action="append", default=[], metavar="REF_ID",
                         help="nur diesen Kurs crawlen (mehrfach möglich)")
     parser.add_argument("--output", type=Path, metavar="DATEI", help="Ausgabe zusätzlich in Datei speichern")
@@ -535,10 +490,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_crawl(args.course, args.output)
     if args.test_sync:
         return cmd_test_sync(args.test_sync, args.videos)
-    if args.dry_run:
-        return cmd_dry_run(args.course, args.output)
-    if args.sync:
-        return cmd_sync(args.course, args.yes)
+    if args.dry_run or args.sync:
+        return cmd_sync(args.dry_run, args.output)
     return cmd_logout()
 
 

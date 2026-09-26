@@ -153,7 +153,7 @@ class Tray(QObject):
         self.act_pause.setText("Sync fortsetzen" if c.paused else "Sync pausieren")
         self.act_pause.setEnabled(c.config is not None)
 
-        run = c.api.last_run() if c.config is not None else None
+        run = c.last_run
         if run is None:
             self.act_last.setText("Letzter Sync: noch nie")
         else:

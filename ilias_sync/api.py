@@ -109,6 +109,7 @@ class BaseDirCheck:
     has_root_folder: bool
     existing_semesters: list[str]
     message: str | None
+    is_empty: bool = True            # Uni Ordner fehlt oder ist leer (Voraussetzung für den ersten Sync)
 
 
 @dataclass

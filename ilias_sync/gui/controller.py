@@ -24,6 +24,7 @@ from ilias_sync.api import (
     Progress,
     SessionState,
     SyncResult,
+    SyncRun,
 )
 from ilias_sync.gui.icons import IconState
 from ilias_sync.gui.worker import Task, run_task
@@ -63,6 +64,9 @@ class Controller(QObject):
         self.login_needed = False
         self.offline = False
         self.next_sync_at: datetime | None = None
+        # Letzter Lauf aus dem Index, zwischengespeichert: Tray, Fenster und Übersicht
+        # fragen ihn bei jedem Fortschritt ab, das soll keine Datenbankabfrage sein
+        self.last_run: SyncRun | None = None
         self._task: Task | None = None
         self._task_kind: str | None = None   # "sync" oder "dry_run"
         self.reload_config()
@@ -77,6 +81,7 @@ class Controller(QObject):
             self.config = None
             self.config_error = str(e)
             log.warning("Config Fehler: %s", e)
+        self.refresh_last_run()
         self.config_changed.emit()
         self.state_changed.emit()
 
@@ -85,8 +90,20 @@ class Controller(QObject):
         self.api.save_config(cfg)
         self.config = cfg
         self.config_error = None
+        self.refresh_last_run()   # neuer Uni Ordner hat einen eigenen Index
         self.config_changed.emit()
         self.state_changed.emit()
+
+    def refresh_last_run(self) -> None:
+        """Letzten Lauf neu aus dem Backend lesen (nach Sync, Config Wechsel, Login)."""
+        if self.config is None:
+            self.last_run = None
+            return
+        try:
+            self.last_run = self.api.last_run()
+        except Exception:  # noqa: BLE001, Anzeige darf nie abstürzen
+            log.exception("Letzter Sync konnte nicht gelesen werden")
+            self.last_run = None
 
     @property
     def paused(self) -> bool:
@@ -196,6 +213,7 @@ class Controller(QObject):
         self._finish_task()
         self.offline = False
         if kind == "sync":
+            self.refresh_last_run()
             assert isinstance(result, SyncResult)
             self.last_result = result
             self.last_error = "; ".join(result.errors) if result.errors else None
@@ -230,6 +248,8 @@ class Controller(QObject):
             else:
                 self.last_error = text
                 self.error.emit(text, automatic)
+        if kind == "sync":
+            self.refresh_last_run()
         self.files_changed.emit()
         self.state_changed.emit()
 

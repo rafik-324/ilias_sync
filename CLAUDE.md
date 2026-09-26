@@ -64,9 +64,9 @@ Das Repo liegt in OneDrive und wird auf beiden Rechnern genutzt. Zuerst per `una
 
 ```
 ilias_sync/
-  __main__.py          Einstieg: GUI starten oder CLI Modus (bisher --login, --logout, --crawl
-                       mit --course/--output/-v, --test-sync ZIELORDNER [--videos];
-                       --sync und --dry-run folgen mit Meilenstein 3)
+  __main__.py          Einstieg: GUI starten oder CLI Modus (--login, --logout, --crawl
+                       mit --course/--output/-v, --test-sync ZIELORDNER [--videos],
+                       --dry-run und --sync [--output])
   auth.py              Login, Session, Cookies, Keyring (Basis: ilias_login.py)
   crawler.py           ILIAS Kurse und Objekte rekursiv erfassen
   objects/             Handler pro ILIAS Objekttyp
@@ -77,8 +77,9 @@ ilias_sync/
     weblink.py
     forum.py
   mapper.py            ILIAS Pfad -> lokaler Zielpfad (Kategorien, Config Regeln)
-  downloader.py        Downloads, atomares Schreiben, Versionierung
-  state.py             SQLite Index
+  downloader.py        Downloads, atomares Schreiben, Hash, Namen für Versionen
+  sync.py              Sync planen (Mapper + Index + Dateisystem) und ausführen
+  state.py             SQLite Index, eine Datenbank pro Uni Ordner
   config.py            Laden, Validieren, Standardwerte
   scheduler.py         Intervall Sync im Hintergrund (Logik ohne Qt)
   api.py               Fassade für die GUI: einzige Schnittstelle zwischen GUI und Backend
@@ -145,7 +146,9 @@ Anforderungen:
 * Parallelität standardmäßig 3, maximal 5, kleine Pause zwischen Seitenabrufen
 * Unbekannte Objekttypen loggen und überspringen, nicht abbrechen
 
-## Was heruntergeladen wird ("alles")
+## Was heruntergeladen wird
+
+**Entscheidung des Nutzers (2026-09-25): nur Dateien**, dazu gehören auch Videos, die in ILIAS als Datei liegen (`.mp4` usw.). Übungen, Weblinks, Foren, MobileQuiz, TraQ, Lernmodule und alle übrigen Objekttypen werden **nicht** geladen, auch keine Link Dateien. Die Tabelle unten war der ursprüngliche Plan und gilt nur noch, falls der Nutzer das später wieder möchte.
 
 | ILIAS Objekt | Lokal |
 |---|---|
@@ -263,6 +266,7 @@ Enthält ein Name Schlüsselwörter mehrerer Kategorien (z. B. `Linux: Folien un
 
 * Existiert lokal bereits ein passender Ordner (Vergleich ohne Nummernpräfix, ohne Groß/Kleinschreibung, Umlaute normalisiert), **diesen verwenden**. Also `02_tutorium` wird für Kategorie Tutorium genutzt, kein zweiter Ordner angelegt
 * Existiert keiner: neuen Ordner mit nächster freier Nummer anlegen, Schreibweise nach Mehrheit im Kurs (z. B. `03_Tutorium`)
+* **Videos** (Wunsch des Nutzers) kommen in einen Unterordner `NN_Videos` des Ordners, in dem sie sonst neben den PDFs lägen, z. B. `02_praktische_informatik_i/01_Vorlesung/01 Vom Problem zum Programm/01_Videos/`. Ein vorhandener lokaler Ordner `videos` wird wiederverwendet. Kein Extra Ordner, wenn ein übernommener ILIAS Ordner schon nach Video klingt (`video`, `aufzeichnung`, `recording`, `screencast`)
 * Tiefere Ebenen werden 1:1 aus ILIAS übernommen (gleiche Normalisierung, damit vorhandene Ordner wie `01_tutorium` wiedergefunden werden)
 
 ### 4. Config Regeln (Ausnahmen, haben Vorrang)
@@ -365,13 +369,13 @@ Seitenleiste links mit diesen Seiten, Design folgt automatisch dem hellen oder d
 * **Übersicht**: Status, letzter Sync, Liste der zuletzt geladenen Dateien mit Kurs und Zielordner
 * **Kurse**: Tabelle ILIAS Kurs → lokaler Ordner, Dropdown zum Ändern, Checkboxen pro Kurs für Videos/Foren/Übungen, Regeln bearbeiten
 * **Vorschau**: Dry Run Ergebnis als Baum ("so würde einsortiert"), bevor es echt läuft
-* **Einstellungen**: Basisordner, Intervall, Parallelität, Autostart, Konto (Uni-ID, abmelden = Keyring und Cookies löschen)
+* **Einstellungen**: Button "Jetzt synchronisieren", Basisordner, Intervall, Parallelität, Semester Ordner, Autostart, Konto (Uni-ID, abmelden = Keyring und Cookies löschen)
 * **Log**: letzte Meldungen, Button "Log Ordner öffnen"
 
 ### Setup Wizard (erster Start)
 
 1. Uni-ID + Passwort, Login testen
-2. **Basispfad einmalig festlegen**: Eingabefeld + "Durchsuchen" Button (nativer Ordnerdialog). Ab diesem Pfad erstellt das Tool alle Unterordner selbst (siehe Abschnitt "Ordneraufbau ab Basispfad"). Pfad wird geprüft (existiert, beschreibbar), fehlende Ordner werden nach Bestätigung angelegt. Danach nur noch in den Einstellungen änderbar, mit Warnung und ohne Dateien zu verschieben
+2. **Basispfad einmalig festlegen**: Eingabefeld + "Durchsuchen" Button (nativer Ordnerdialog). Ab diesem Pfad erstellt das Tool alle Unterordner selbst (siehe Abschnitt "Ordneraufbau ab Basispfad"). Pfad wird geprüft (existiert, beschreibbar, Uni Ordner leer oder noch nicht vorhanden), fehlende Ordner werden nach Bestätigung angelegt. Der erste Sync läuft nur in einen leeren Uni Ordner, ein Uni Ordner mit Inhalt wird abgelehnt. Danach nur noch in den Einstellungen änderbar, mit Warnung und ohne Dateien zu verschieben
 3. Kurse abrufen. Ist der Basispfad leer: Struktur vorschlagen und anlegen. Enthält er schon Ordner: Zuordnung zu vorhandenen Kursordnern per Fuzzy Match vorschlagen. Nutzer bestätigt/korrigiert
 4. Dry Run anzeigen
 5. Erster echter Sync
@@ -395,18 +399,24 @@ Sync läuft immer in einem Worker Thread (`QThread`), die GUI blockiert nie.
 2. **Crawler Grundlage**: Dashboard Kurse auslesen, Fixtures speichern, Kursliste per CLI ausgeben
 3. **Dateien + Ordner**: rekursiv crawlen, Download mit Index, CLI `--dry-run` und `--sync`
 4. **Mapper**: Kategorieerkennung, Nutzung bestehender Ordner, Config Regeln, Ignore Liste. Tests mit der Struktur oben
-5. **Weitere Objekttypen**: Übungen, Weblinks, Videos (Opencast recherchieren), Foren
+5. ~~**Weitere Objekttypen**~~: entfällt, nur Dateien (Entscheidung des Nutzers 2026-09-25)
 6. **GUI**: Tray Icon, Hauptfenster, Setup Wizard, Benachrichtigungen, Hintergrund Intervall
 7. **Plattform**: Autostart, Dateinamen/Unicode Tests, Builds für macOS und Windows
 
 Nach jedem Meilenstein lauffähig und getestet, bevor der nächste beginnt.
 
-**Stand (2026-09-24)**: Meilenstein 1 und 2 fertig, Crawler mit 3 parallelen Abrufen und automatischem Relogin. Meilenstein 4 (Mapper) vorgezogen und weitgehend fertig, weil der Downloader die Zielpfade braucht. Von Meilenstein 3 gibt es den einfachen Downloader (`.part`, atomar, nie überschreiben) und `--test-sync`, der in `01_Universität_Mannheim\_ILIAS_Sync_Test` einsortiert. Status Index (`state.py`) steht. Es fehlen noch Erkennung geänderter Dateien (nur melden, siehe Downloadregeln), `--dry-run` und `--sync`. **Der echte `01_SEMESTER` wird bis zur Fertigstellung nur gelesen** (Vorgabe des Nutzers). GUI (Meilenstein 6) läuft parallel auf Branch `gui` gegen das Fake Backend.
+**Stand (2026-09-25)**: Meilenstein 1 und 2 fertig, Crawler mit 3 parallelen Abrufen und automatischem Relogin. Meilenstein 4 (Mapper) vorgezogen und weitgehend fertig. Meilenstein 3 im CLI fertig: Status Index (`state.py`), Versionierung (`_alt_`, `_ilias_`), `--dry-run` und `--sync` (`sync.py`). Es fehlt noch die echte `api.Api` für die GUI. `--test-sync` bleibt für Tests. **Der echte `01_SEMESTER` wird nie beschrieben** (Vorgabe des Nutzers). GUI (Meilenstein 6) läuft parallel auf Branch `gui` gegen das Fake Backend.
 
-Offene Entscheidungen des Nutzers (nach dem Test Sync):
-* PI1 Vorlesung: eigene Ordner (`01_Vorlesung_grundlagen_programmiereung`, `02_Vorlesung_grundlagen_Java`) heißen anders als in ILIAS (`01 Vom Problem zum Programm` ...), der Mapper legt die ILIAS Ordner daneben an. Umbenennen oder Config Regeln?
-* Matlab Lizenzkurs (MSDNAA, landet in `_Ohne_Semester`): behalten oder ignorieren?
-* Videos (85 Stück, etwa 4 GB): laden oder nicht?
+Entscheidung des Nutzers (2026-09-25): **Der erste echte Sync läuft in einen komplett neuen, leeren Basisordner** und lädt alles einmal herunter (auch Videos, auch den Lizenzkurs unter `_Ohne_Semester`). Die bisherigen eigenen Ordner bleiben unberührt, das Tool legt die Struktur selbst an. Umsetzung:
+* Erster Sync (Index für diesen Uni Ordner leer) nur, wenn der Uni Ordner fehlt oder leer ist, sonst Abbruch mit Hinweis (`sync.check_first_sync`, `BaseDirCheck.is_empty`)
+* Kurse ohne Zuordnung bekommen beim Sync `NN_kursname` Ordner (`Mapper.suggest_courses`), gespeichert in der Config. Kurse derselben Veranstaltung ([V], [Ü], [T], Tut Gruppe) teilen sich einen Ordner
+* Der Index liegt pro Uni Ordner im Datenverzeichnis, lokale Pfade relativ zum Uni Ordner
+
+**Erster echter Sync erledigt (2026-09-25)**: Config `base_dir` = `C:\Users\rafik\OneDrive\Uni_neu` (alte Config gesichert als `config_vor_Uni_neu.toml` im Config Verzeichnis). 282 Dateien, 4,0 GB, 0 Fehler; zweiter Lauf: nichts zu tun. Die Kurszuordnungen `NN_kursname` stehen jetzt in der Config.
+
+Nächste Schritte Backend:
+* Echte `api.Api` für die GUI (GUI Agent wartet darauf, zuerst dry_run, sync, last_run, recent_files, removed_items, redownload, Konto und Config Methoden, dann check_base_dir, fetch_courses, suggest_mapping)
+* Danach Hintergrund Sync, Autostart, Builds
 
 Ausnahme: Die GUI (Meilenstein 6) kann parallel von einem eigenen Agenten gegen `gui/fake_backend.py` entwickelt werden (siehe `GUI_KONTEXT.md`). `api.py` entsteht schrittweise mit den Backend Meilensteinen und ersetzt dann die Attrappe.
 

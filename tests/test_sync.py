@@ -1,333 +1,242 @@
-"""Sync Tests: Planen und Ausführen gegen Index und Dateisystem, ohne Netz."""
+"""Sync Tests: Planen und Ausführen mit Index, nie überschreiben, nie löschen."""
 
-import os
 import threading
-import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 import pytest
 import requests
 
 from ilias_sync import state, sync
-from ilias_sync.api import Config, CourseConfig
+from ilias_sync.api import ActionKind, Config, CourseConfig, ItemStatus
 from ilias_sync.crawler import Course, IliasObject
-from ilias_sync.mapper import MappedItem, MappingResult
-from ilias_sync.state import State
-from ilias_sync.sync import Kind
+from ilias_sync.mapper import CourseMapping, MappedItem, MappingResult
 
-COURSE = Course("crs", 100, "Marketing [V] (HWS 2026)", "https://ilias/crs/100", "HWS 2026", "HWS 2026")
-MTIME = datetime(2026, 7, 10, 16, 57)
+TODAY = date.today().strftime("%Y-%m-%d")
+COURSE = Course("crs", 100, "Marketing [V] (HWS 2026)", "u100", "HWS 2026", "HWS 2026")
 
 
-def url(ref_id: int) -> str:
-    return f"https://ilias.uni-mannheim.de/goto.php/file/{ref_id}/download"
-
-
-def file_item(ref_id: int, name: str = "Skript.pdf", mtime=MTIME, size=1000,
-              folder: tuple[str, ...] = ("01_SEMESTER", "01_marketing", "01_Vorlesung")) -> MappedItem:
-    obj = IliasObject("file", ref_id, name, url(ref_id), [COURSE.name, "Vorlesung"], size, mtime)
-    return MappedItem(obj, COURSE, (*folder, name), "Vorlesung", True)
-
-
-def mapping(*items: MappedItem) -> MappingResult:
-    return MappingResult(items=list(items), courses=[], semesters={})
-
-
-def response(body: bytes) -> requests.Response:
+def response(body: bytes, content_type: str = "application/pdf") -> requests.Response:
     r = requests.Response()
     r.status_code = 200
     r._content = body
     r._content_consumed = True
-    r.headers["Content-Type"] = "application/pdf"
+    r.headers["Content-Type"] = content_type
     return r
 
 
 class FakeSession:
-    """Liefert pro URL einen festen Inhalt, zählt Abrufe."""
+    """Liefert je URL einen Inhalt, zählt Abrufe."""
 
-    def __init__(self, bodies: dict[str, bytes] | None = None, fail: set[str] | None = None):
-        self.bodies = bodies or {}
-        self.fail = fail or set()
+    def __init__(self, files: dict):
+        self.files = files
         self.calls: list[str] = []
-        self._lock = threading.Lock()
 
-    def get(self, u, stream, timeout):
-        with self._lock:
-            self.calls.append(u)
-        if u in self.fail:
-            raise requests.ConnectionError("offline")
-        return response(self.bodies.get(u, b"%PDF " + u.encode()))
+    def get(self, url, stream, timeout):
+        self.calls.append(url)
+        body = self.files[url]
+        if isinstance(body, Exception):
+            raise body
+        return response(body)
+
+
+def mapped(ref_id: int, name: str = "skript.pdf", size: int = 10, mtime=datetime(2026, 9, 1, 12, 0)) -> MappedItem:
+    obj = IliasObject("file", ref_id, name, f"u{ref_id}", path=[COURSE.name], size=size, mtime=mtime)
+    rel = ("01_SEMESTER", "01_marketing", "01_Vorlesung", name)
+    return MappedItem(obj, COURSE, rel, "Vorlesung", False, {rel[:1], rel[:2], rel[:3]})
+
+
+def mapping(*items: MappedItem) -> MappingResult:
+    cm = CourseMapping(COURSE, "HWS 2026", "01_SEMESTER", "01_marketing", False, "config")
+    return MappingResult(list(items), [cm], {"HWS 2026": "01_SEMESTER"})
 
 
 @pytest.fixture
-def st(tmp_path):
-    with State(tmp_path / "state.db") as s:
-        yield s
+def env(tmp_path):
+    root = tmp_path / "Uni"
+    st = state.State(tmp_path / "index.sqlite3")
+    yield root, st
+    st.close()
 
 
-@pytest.fixture
-def root(tmp_path):
-    r = tmp_path / "01_Universität_Mannheim"
-    r.mkdir()
-    return r
+def run(m: MappingResult, st, root, session, cfg=None, cancel=None):
+    jobs = sync.plan(m, st, root, cfg or Config(base_dir=None))
+    result, _ = sync.execute(jobs, m, session, st, root, 2, cancel=cancel)
+    return jobs, result
 
 
-def run(items, st, root, session=None, cfg=None, **kw):
-    cfg = cfg or Config(base_dir=None)
-    session = session or FakeSession()
-    actions = sync.plan(mapping(*items), st, root, cfg)
-    return actions, sync.execute(actions, session, st, root, **kw), session
+def target(root, name="skript.pdf"):
+    return root / "01_SEMESTER" / "01_marketing" / "01_Vorlesung" / name
 
 
-def make_old(path):
-    """Datei so aussehen lassen, als läge sie schon länger da (vor dem Index Eintrag)."""
-    old = time.time() - 3600
-    os.utime(path, (old, old))
-
-
-# ---------------- Neue Dateien ----------------
-
-def test_new_file_downloaded_and_indexed(st, root):
-    actions, summary, session = run([file_item(1)], st, root)
-    assert [a.kind for a in actions] == [Kind.NEW]
-    target = root / "01_SEMESTER" / "01_marketing" / "01_Vorlesung" / "Skript.pdf"
-    assert target.read_bytes() == b"%PDF " + url(1).encode()
-    item = st.get(1)
-    assert item.status == "ok"
-    assert item.local_path == "01_SEMESTER/01_marketing/01_Vorlesung/Skript.pdf"
-    assert item.sha256 == state.sha256_file(target)
-    assert (item.ilias_mtime, item.size, item.url) == (MTIME, 1000, url(1))
-    assert [i.ref_id for i in summary.new] == [1]
+def test_new_file_is_downloaded_and_indexed(env):
+    root, st = env
+    session = FakeSession({"u1": b"v1"})
+    jobs, result = run(mapping(mapped(1)), st, root, session)
+    assert [j.kind for j in jobs] == [ActionKind.NEW]
+    assert target(root).read_bytes() == b"v1"
+    entry = st.get(1)
+    assert entry.status == ItemStatus.OK
+    assert entry.local_path == "01_SEMESTER/01_marketing/01_Vorlesung/skript.pdf"
+    assert entry.sha256 is not None and entry.size == 10
+    assert result.run.new == 1 and result.run.errors == 0
+    assert [f.name for f in result.new_files] == ["skript.pdf"]
     assert st.last_run().new == 1
 
-
-def test_second_run_does_nothing(st, root):
-    run([file_item(1)], st, root)
-    actions, summary, session = run([file_item(1)], st, root)
-    assert [a.kind for a in actions] == [Kind.UNCHANGED]
-    assert session.calls == []
-    assert summary.new == [] and summary.changed == []
+    # Zweiter Lauf: nichts zu tun, kein Abruf
+    jobs, result = run(mapping(mapped(1)), st, root, session)
+    assert jobs == [] and session.calls == ["u1"]
 
 
-def test_existing_local_file_is_adopted_not_overwritten(st, root):
-    target = root / "01_SEMESTER" / "01_marketing" / "01_Vorlesung" / "Skript.pdf"
-    target.parent.mkdir(parents=True)
-    target.write_bytes(b"selbst geladen")
-    make_old(target)
-    actions, summary, session = run([file_item(1)], st, root)
-    assert [a.kind for a in actions] == [Kind.ADOPT]
-    assert session.calls == []
-    assert target.read_bytes() == b"selbst geladen"
-    item = st.get(1)
-    assert item.status == "ok"
-    assert item.sha256 == state.sha256_file(target)
-    # Übernommene Dateien erscheinen nicht als "gerade geladen"
-    assert item.downloaded_at < datetime.now() - timedelta(minutes=30)
-    assert summary.adopted == 1 and summary.new == []
+def test_removed_by_user_is_never_downloaded_again(env):
+    root, st = env
+    session = FakeSession({"u1": b"v1"})
+    run(mapping(mapped(1)), st, root, session)
+    target(root).unlink()
+
+    jobs, _ = run(mapping(mapped(1)), st, root, session)
+    assert [(j.kind, j.mark_removed) for j in jobs] == [(ActionKind.SKIP_REMOVED, True)]
+    assert st.get(1).status == ItemStatus.USER_REMOVED
+    jobs, _ = run(mapping(mapped(1, size=99)), st, root, session)   # auch nicht, wenn ILIAS sie ändert
+    assert [(j.kind, j.mark_removed) for j in jobs] == [(ActionKind.SKIP_REMOVED, False)]
+    assert not target(root).exists() and session.calls == ["u1"]
+    assert [i.ref_id for i in st.removed()] == [1]
 
 
-def test_error_is_recorded_and_retried(st, root):
-    failing = FakeSession(fail={url(1)})
-    _, summary, _ = run([file_item(1)], st, root, session=failing)
-    assert len(summary.errors) == 1
-    assert "Marketing" in summary.errors[0]
-    assert st.get(1).status == "error"
-    assert st.last_run().errors == 1
-    actions, summary, _ = run([file_item(1)], st, root)
-    assert [a.kind for a in actions] == [Kind.NEW]
-    assert st.get(1).status == "ok"
+def test_moved_by_user_counts_as_removed(env):
+    root, st = env
+    run(mapping(mapped(1)), st, root, FakeSession({"u1": b"v1"}))
+    target(root).rename(root / "woanders.pdf")
+    jobs, _ = run(mapping(mapped(1)), st, root, FakeSession({}))
+    assert jobs[0].kind == ActionKind.SKIP_REMOVED
 
 
-# ---------------- In ILIAS geändert: nur melden ----------------
-
-def test_changed_in_ilias_is_only_reported(st, root):
-    run([file_item(1)], st, root)
-    target = root / "01_SEMESTER" / "01_marketing" / "01_Vorlesung" / "Skript.pdf"
-    before = target.read_bytes()
-    new_mtime = datetime(2026, 10, 3, 9, 0)
-    actions, summary, session = run([file_item(1, mtime=new_mtime, size=1200)], st, root)
-    assert [a.kind for a in actions] == [Kind.CHANGED]
-    assert session.calls == []
-    assert target.read_bytes() == before
-    assert [i.ref_id for i in summary.changed] == [1]
-    item = st.get(1)
-    assert item.status == "ilias_changed"
-    assert (item.new_mtime, item.new_size) == (new_mtime, 1200)
-    assert (item.ilias_mtime, item.size) == (MTIME, 1000)
+def test_changed_in_ilias_keeps_old_version(env):
+    root, st = env
+    run(mapping(mapped(1)), st, root, FakeSession({"u1": b"v1"}))
+    jobs, result = run(mapping(mapped(1, mtime=datetime(2026, 9, 20, 8, 0))), st, root, FakeSession({"u1": b"v2"}))
+    assert [j.kind for j in jobs] == [ActionKind.UPDATE]
+    assert target(root).read_bytes() == b"v2"
+    assert target(root, f"skript_alt_{TODAY}.pdf").read_bytes() == b"v1"
+    entry = st.get(1)
+    assert entry.status == ItemStatus.UPDATED and entry.ilias_mtime == datetime(2026, 9, 20, 8, 0)
+    assert result.run.updated == 1
 
 
-def test_changed_reported_only_once(st, root):
-    run([file_item(1)], st, root)
-    changed = file_item(1, mtime=datetime(2026, 10, 3))
-    _, first, _ = run([changed], st, root)
-    _, second, _ = run([changed], st, root)
-    assert len(first.changed) == 1
-    assert second.changed == []
-    assert st.get(1).status == "ilias_changed"
+def test_changed_in_ilias_and_by_user_is_conflict(env):
+    root, st = env
+    run(mapping(mapped(1)), st, root, FakeSession({"u1": b"v1"}))
+    target(root).write_bytes(b"meine Notizen")
+    jobs, _ = run(mapping(mapped(1, size=20)), st, root, FakeSession({"u1": b"v2"}))
+    assert [j.kind for j in jobs] == [ActionKind.CONFLICT]
+    assert target(root).read_bytes() == b"meine Notizen"
+    assert target(root, f"skript_ilias_{TODAY}.pdf").read_bytes() == b"v2"
+    entry = st.get(1)
+    assert entry.status == ItemStatus.USER_MODIFIED and entry.size == 20
+    assert entry.local_path.endswith("/skript.pdf")
+    # In ILIAS unverändert: kein weiterer Konflikt
+    assert sync.plan(mapping(mapped(1, size=20)), st, root, Config(base_dir=None)) == []
 
 
-def test_size_change_alone_counts(st, root):
-    run([file_item(1)], st, root)
-    actions, _, _ = run([file_item(1, size=2000)], st, root)
-    assert [a.kind for a in actions] == [Kind.CHANGED]
+def test_user_modified_without_ilias_change_is_left_alone(env):
+    root, st = env
+    run(mapping(mapped(1)), st, root, FakeSession({"u1": b"v1"}))
+    target(root).write_bytes(b"meine Notizen")
+    assert sync.plan(mapping(mapped(1)), st, root, Config(base_dir=None)) == []
 
 
-def test_unknown_values_do_not_count_as_change(st, root):
-    run([file_item(1)], st, root)
-    actions, _, _ = run([file_item(1, mtime=None, size=None)], st, root)
-    assert [a.kind for a in actions] == [Kind.UNCHANGED]
+def test_unknown_identical_file_is_adopted(env):
+    root, st = env
+    target(root).parent.mkdir(parents=True)
+    target(root).write_bytes(b"v1")
+    jobs, result = run(mapping(mapped(1)), st, root, FakeSession({"u1": b"v1"}))
+    assert [j.kind for j in jobs] == [ActionKind.CONFLICT]
+    assert sorted(p.name for p in target(root).parent.iterdir()) == ["skript.pdf"]
+    assert st.get(1).status == ItemStatus.OK
+    assert result.new_files == []
 
 
-def test_dismissed_change_stays_quiet(st, root):
-    run([file_item(1)], st, root)
-    changed = file_item(1, mtime=datetime(2026, 10, 3))
-    run([changed], st, root)
-    st.dismiss_changed(1)
-    actions, summary, _ = run([changed], st, root)
-    assert [a.kind for a in actions] == [Kind.UNCHANGED]
-    assert summary.changed == []
-    # Ändert sich die Datei erneut, wird wieder gemeldet
-    _, summary, _ = run([file_item(1, mtime=datetime(2026, 10, 9))], st, root)
-    assert len(summary.changed) == 1
+def test_unknown_different_file_is_kept(env):
+    root, st = env
+    target(root).parent.mkdir(parents=True)
+    target(root).write_bytes(b"eigene Datei")
+    run(mapping(mapped(1)), st, root, FakeSession({"u1": b"v1"}))
+    assert target(root).read_bytes() == b"eigene Datei"
+    assert target(root, f"skript_ilias_{TODAY}.pdf").read_bytes() == b"v1"
+    assert st.get(1).local_path.endswith(f"skript_ilias_{TODAY}.pdf")
 
 
-def test_user_edited_then_changed_in_ilias(st, root):
-    """Nutzer schreibt Notizen ins PDF, danach lädt der Dozent eine neue Version hoch."""
-    run([file_item(1)], st, root)
-    target = root / "01_SEMESTER" / "01_marketing" / "01_Vorlesung" / "Skript.pdf"
-    target.write_bytes(b"mit meinen Notizen")
-    future = time.time() + 60
-    os.utime(target, (future, future))
-    actions, _, _ = run([file_item(1)], st, root)
-    assert actions[0].user_modified
-    assert st.get(1).status == "user_modified"
-
-    actions, summary, session = run([file_item(1, mtime=datetime(2026, 10, 3))], st, root)
-    assert [a.kind for a in actions] == [Kind.CHANGED]
-    assert session.calls == []
-    assert target.read_bytes() == b"mit meinen Notizen"
-    assert len(summary.changed) == 1
+def test_versioned_names_never_collide(env):
+    root, st = env
+    run(mapping(mapped(1)), st, root, FakeSession({"u1": b"v1"}))
+    target(root, f"skript_alt_{TODAY}.pdf").write_bytes(b"schon da")
+    run(mapping(mapped(1, size=11)), st, root, FakeSession({"u1": b"v2"}))
+    assert target(root, f"skript_alt_{TODAY}.pdf").read_bytes() == b"schon da"
+    assert target(root, f"skript_alt_{TODAY}_2.pdf").read_bytes() == b"v1"
+    assert target(root).read_bytes() == b"v2"
 
 
-# ---------------- Laden auf Wunsch des Nutzers ----------------
-
-def test_download_changed_puts_new_version_next_to_file(st, root):
-    run([file_item(1)], st, root)
-    target = root / "01_SEMESTER" / "01_marketing" / "01_Vorlesung" / "Skript.pdf"
-    target.write_bytes(b"mit meinen Notizen")
-    new_mtime = datetime(2026, 10, 3, 9, 0)
-    run([file_item(1, mtime=new_mtime, size=1200)], st, root)
-
-    session = FakeSession({url(1): b"neue Version"})
-    item = sync.download_changed(session, st, root, 1)
-    new_file = target.with_name(f"Skript_ilias_{date.today():%Y-%m-%d}.pdf")
-    assert new_file.read_bytes() == b"neue Version"
-    assert target.read_bytes() == b"mit meinen Notizen"
-    assert item.status == "updated"
-    assert item.local_path.endswith(new_file.name)
-    assert (item.ilias_mtime, item.size, item.new_mtime) == (new_mtime, 1200, None)
-    # Beim nächsten Sync ist alles ruhig
-    actions, summary, session = run([file_item(1, mtime=new_mtime, size=1200)], st, root)
-    assert [a.kind for a in actions] == [Kind.UNCHANGED]
-    assert session.calls == []
+def test_error_is_retried_next_time(env):
+    root, st = env
+    _, result = run(mapping(mapped(1)), st, root, FakeSession({"u1": requests.ConnectionError()}))
+    assert result.run.errors == 1 and result.errors
+    assert st.get(1).status == ItemStatus.ERROR
+    assert not list(target(root).parent.glob("*.part"))
+    jobs, _ = run(mapping(mapped(1)), st, root, FakeSession({"u1": b"v1"}))
+    assert [j.kind for j in jobs] == [ActionKind.NEW]
+    assert st.get(1).status == ItemStatus.OK
 
 
-def test_download_changed_requires_changed_status(st, root):
-    run([file_item(1)], st, root)
-    with pytest.raises(sync.ItemNotAvailable):
-        sync.download_changed(FakeSession(), st, root, 1)
-    with pytest.raises(sync.ItemNotAvailable):
-        sync.download_changed(FakeSession(), st, root, 99)
+def test_failed_update_keeps_original(env):
+    root, st = env
+    run(mapping(mapped(1)), st, root, FakeSession({"u1": b"v1"}))
+    run(mapping(mapped(1, size=11)), st, root, FakeSession({"u1": requests.Timeout()}))
+    assert target(root).read_bytes() == b"v1"
+    assert sorted(p.name for p in target(root).parent.iterdir()) == ["skript.pdf"]
+    assert st.get(1).status == ItemStatus.OK   # nächster Lauf versucht das Update erneut
 
 
-# ---------------- Vom Nutzer entfernt ----------------
-
-def test_removed_by_user_is_not_downloaded_again(st, root):
-    run([file_item(1)], st, root)
-    target = root / "01_SEMESTER" / "01_marketing" / "01_Vorlesung" / "Skript.pdf"
-    target.unlink()
-    actions, summary, session = run([file_item(1)], st, root)
-    assert [a.kind for a in actions] == [Kind.REMOVED]
-    assert summary.removed == 1
-    assert st.get(1).status == "user_removed"
-    assert not target.exists()
-    # Bleibt so, auch in späteren Läufen und wenn ILIAS die Datei ändert
-    actions, summary, session = run([file_item(1, mtime=datetime(2026, 10, 3))], st, root)
-    assert [a.kind for a in actions] == [Kind.REMOVED]
-    assert summary.removed == 0 and session.calls == []
-
-
-def test_moved_by_user_is_not_downloaded_again(st, root):
-    run([file_item(1)], st, root)
-    target = root / "01_SEMESTER" / "01_marketing" / "01_Vorlesung" / "Skript.pdf"
-    target.rename(root / "woanders.pdf")
-    actions, _, session = run([file_item(1)], st, root)
-    assert [a.kind for a in actions] == [Kind.REMOVED]
-    assert session.calls == []
-
-
-def test_redownload(st, root):
-    run([file_item(1)], st, root)
-    target = root / "01_SEMESTER" / "01_marketing" / "01_Vorlesung" / "Skript.pdf"
-    target.unlink()
-    run([file_item(1)], st, root)
-    item = sync.redownload(FakeSession({url(1): b"wieder da"}), st, root, 1)
-    assert target.read_bytes() == b"wieder da"
-    assert item.status == "ok"
-
-
-def test_redownload_never_overwrites(st, root):
-    run([file_item(1)], st, root)
-    target = root / "01_SEMESTER" / "01_marketing" / "01_Vorlesung" / "Skript.pdf"
-    target.unlink()
-    run([file_item(1)], st, root)
-    st.set_status(1, "user_removed")
-    target.write_bytes(b"neu vom Nutzer")
-    sync.redownload(FakeSession({url(1): b"aus ILIAS"}), st, root, 1)
-    assert target.read_bytes() == b"neu vom Nutzer"
-    assert target.with_name(f"Skript_ilias_{date.today():%Y-%m-%d}.pdf").read_bytes() == b"aus ILIAS"
-
-
-# ---------------- Einstellungen, Abbruch, Fortschritt ----------------
-
-def test_disabled_videos_are_skipped(st, root):
-    cfg = Config(base_dir=None, courses=[CourseConfig(100, COURSE.name, "01_marketing", download_videos=False)])
-    items = [file_item(1), file_item(2, name="Vorlesung 1.mp4")]
-    actions, summary, session = run(items, st, root, cfg=cfg)
-    assert [a.kind for a in actions] == [Kind.NEW, Kind.DISABLED]
-    assert session.calls == [url(1)]
-    assert st.get(2) is None
-
-
-def test_non_files_are_ignored_for_now(st, root):
-    link = file_item(1)
-    link.obj.type = "webr"
-    actions, _, _ = run([link], st, root)
-    assert actions == []
-
-
-def test_cancel_stops_downloads(st, root):
+def test_cancel_before_start_downloads_nothing(env):
+    root, st = env
     cancel = threading.Event()
     cancel.set()
-    _, summary, session = run([file_item(1), file_item(2, name="b.pdf")], st, root, cancel=cancel)
-    assert summary.cancelled
-    assert session.calls == []
-    assert st.last_run().cancelled
+    session = FakeSession({"u1": b"v1"})
+    _, result = run(mapping(mapped(1)), st, root, session, cancel=cancel)
+    assert session.calls == [] and result.run.cancelled
+    assert st.get(1) is None
 
 
-def test_progress_reports_downloads(st, root):
-    seen = []
-    run([file_item(1), file_item(2, name="b.pdf")], st, root, progress=seen.append)
-    assert seen[0].current == 0 and seen[0].total == 2
-    assert seen[-1].current == 2
-    assert all(p.phase == "Herunterladen" for p in seen)
+def test_video_switch(env):
+    root, st = env
+    cfg = Config(base_dir=None, courses=[CourseConfig(100, COURSE.name, "01_marketing", download_videos=False)])
+    m = mapping(mapped(1), mapped(2, "vorlesung.mp4"))
+    assert [j.item.obj.ref_id for j in sync.plan(m, st, root, cfg)] == [1]
+    assert len(sync.plan(m, st, root, Config(base_dir=None))) == 2
 
 
-def test_plan_writes_nothing(st, root):
-    target = root / "01_SEMESTER" / "01_marketing" / "01_Vorlesung" / "vorhanden.pdf"
-    target.parent.mkdir(parents=True)
-    target.write_bytes(b"x")
-    sync.plan(mapping(file_item(1), file_item(2, name="vorhanden.pdf")), st, root, Config(base_dir=None))
-    assert st.items() == []
-    assert st.last_run() is None
-    assert sorted(p.name for p in target.parent.iterdir()) == ["vorhanden.pdf"]
+def test_dry_run_writes_nothing(env):
+    root, st = env
+    m = mapping(mapped(1), mapped(2, "b.pdf"))
+    actions = sync.planned_actions(sync.plan(m, st, root, Config(base_dir=None)), m, root)
+    kinds = [a.kind for a in actions]
+    assert kinds.count(ActionKind.NEW) == 2 and kinds.count(ActionKind.CREATE_DIR) == 3
+    assert not root.exists() and st.is_empty()
+
+
+def test_first_sync_needs_empty_root(env):
+    root, st = env
+    assert sync.check_first_sync(st, root) is None          # gibt es noch nicht
+    root.mkdir()
+    assert sync.check_first_sync(st, root) is None          # leer
+    (root / "01_SEMESTER").mkdir()
+    assert "leeren" in sync.check_first_sync(st, root)      # fremder Inhalt
+    st.start_run(datetime.now())
+    assert sync.check_first_sync(st, root) is None          # später: eigener Inhalt
+
+
+def test_too_long_path_is_reported(env):
+    root, st = env
+    item = mapped(1, name="x" * 300 + ".pdf")
+    item.rel_path = ("a" * 240, "b.pdf")
+    problems = []
+    assert sync.plan(mapping(item), st, root, Config(base_dir=None), problems) == []
+    assert len(problems) == 1 and "Pfad zu lang" in problems[0]

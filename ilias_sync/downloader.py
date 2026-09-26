@@ -8,8 +8,7 @@ Ablauf pro Datei:
      einloggen und wiederholen
   4. Erst nach vollständigem Download atomar umbenennen (os.replace)
 
-Der Hash (SHA-256) entsteht beim Schreiben, für den Status Index. Neue ILIAS
-Versionen einer vorhandenen Datei legt der Aufrufer über versioned_path daneben.
+Versionierung (_alt_, _ilias_) und Status Index steuert sync.py, hier liegen nur die Bausteine.
 """
 
 from __future__ import annotations
@@ -44,27 +43,54 @@ class DownloadResult:
     status: str        # "neu", "vorhanden", "fehler"
     size: int = 0
     error: str | None = None
-    sha256: str | None = None   # nur bei status "neu"
+    sha256: str | None = None
 
 
 def part_path(target: Path) -> Path:
     return target.with_name(target.name + ".part")
 
 
-def versioned_path(existing: Path, day: date, tag: str = "ilias") -> Path:
-    """<name>_ilias_<YYYY-MM-DD>.<ext> neben existing, bei Bedarf mit _2, _3 ... bis der Name frei ist."""
-    base = f"{existing.stem}_{tag}_{day:%Y-%m-%d}"
-    candidate = existing.with_name(base + existing.suffix)
-    n = 2
-    while candidate.exists() or part_path(candidate).exists():
-        candidate = existing.with_name(f"{base}_{n}{existing.suffix}")
-        n += 1
-    return candidate
-
-
 def _looks_like_login_page(r: requests.Response, target: Path) -> bool:
     content_type = r.headers.get("Content-Type", "").lower()
     return "text/html" in content_type and target.suffix.lower() not in HTML_SUFFIXES
+
+
+def fetch_to_part(
+    session: requests.Session,
+    url: str,
+    part: Path,
+    name_hint: Path,
+    throttle: Throttle | None = None,
+    relogin: Callable[[], None] | None = None,
+) -> tuple[int, str]:
+    """In die .part Datei laden, (Größe, sha256) zurückgeben. name_hint dient der Erkennung
+    von Login Seiten statt Dateien. Wirft requests, OS oder DownloadError, die .part Datei
+    bleibt dann eventuell liegen und muss vom Aufrufer entfernt werden."""
+    part.parent.mkdir(parents=True, exist_ok=True)
+    for attempt in (1, 2):
+        if throttle:
+            throttle.wait()
+        with session.get(url, stream=True, timeout=TIMEOUT) as r:
+            r.raise_for_status()
+            if _looks_like_login_page(r, name_hint):
+                if attempt == 1 and relogin is not None:
+                    log.info("HTML statt Datei erhalten, neuer Login")
+                    relogin()
+                    continue
+                raise DownloadError("ILIAS lieferte eine Webseite statt der Datei (Session abgelaufen?)")
+            size = 0
+            digest = hashlib.sha256()
+            with open(part, "wb") as f:
+                for chunk in r.iter_content(CHUNK_SIZE):
+                    f.write(chunk)
+                    digest.update(chunk)
+                    size += len(chunk)
+            return size, digest.hexdigest()
+    raise DownloadError("ILIAS lieferte eine Webseite statt der Datei (Session abgelaufen?)")
+
+
+def error_text(e: Exception) -> str:
+    return str(e) if isinstance(e, (DownloadError, ValueError)) else type(e).__name__
 
 
 def download_file(
@@ -82,36 +108,37 @@ def download_file(
     if target.exists():
         return DownloadResult(target, "vorhanden")
 
-    target.parent.mkdir(parents=True, exist_ok=True)
     part = part_path(target)
     try:
-        for attempt in (1, 2):
-            if throttle:
-                throttle.wait()
-            with session.get(url, stream=True, timeout=TIMEOUT) as r:
-                r.raise_for_status()
-                if _looks_like_login_page(r, target):
-                    if attempt == 1 and relogin is not None:
-                        log.info("HTML statt Datei erhalten, neuer Login")
-                        relogin()
-                        continue
-                    raise DownloadError("ILIAS lieferte eine Webseite statt der Datei (Session abgelaufen?)")
-                size = 0
-                digest = hashlib.sha256()
-                with open(part, "wb") as f:
-                    for chunk in r.iter_content(CHUNK_SIZE):
-                        f.write(chunk)
-                        digest.update(chunk)
-                        size += len(chunk)
-            break
+        size, sha = fetch_to_part(session, url, part, target, throttle, relogin)
         # Zwischen Prüfung und Umbenennen könnte der Nutzer eine Datei angelegt haben
         if target.exists():
             part.unlink(missing_ok=True)
             return DownloadResult(target, "vorhanden")
         os.replace(part, target)
-        return DownloadResult(target, "neu", size=size, sha256=digest.hexdigest())
+        return DownloadResult(target, "neu", size=size, sha256=sha)
     except (requests.RequestException, OSError, DownloadError) as e:
         part.unlink(missing_ok=True)
-        message = str(e) if isinstance(e, DownloadError) else type(e).__name__
-        log.warning("Download fehlgeschlagen (%s): %s", target.name, message)
-        return DownloadResult(target, "fehler", error=message)
+        log.warning("Download fehlgeschlagen (%s): %s", target.name, error_text(e))
+        return DownloadResult(target, "fehler", error=error_text(e))
+
+
+# ---------------- Versionierung ----------------
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(CHUNK_SIZE), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def versioned_path(path: Path, tag: str, day: date) -> Path:
+    """<name>_<tag>_<YYYY-MM-DD>.<ext>, bei Kollision mit _2, _3 ... Nie ein vorhandener Pfad."""
+    base = f"{path.stem}_{tag}_{day:%Y-%m-%d}"
+    candidate = fit_path(path.with_name(base + path.suffix))
+    n = 2
+    while candidate.exists() or part_path(candidate).exists():
+        candidate = fit_path(path.with_name(f"{base}_{n}{path.suffix}"))
+        n += 1
+    return candidate
