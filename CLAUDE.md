@@ -316,8 +316,8 @@ Config liegt im Config Verzeichnis von `platformdirs`, wird beim Start validiert
 
 * **Nie löschen, nie Nutzerdateien überschreiben**
 * Download erst in temporäre Datei im Zielordner (`.part`), nach vollständigem Download atomar umbenennen (`os.replace`)
-* Datei in ILIAS geändert (Änderungsdatum oder Größe anders): alte lokale Version umbenennen zu `<name>_alt_<YYYY-MM-DD>.<ext>`, dann neue ablegen
-* Lokale Datei vom Nutzer verändert (Hash weicht vom Index ab): nicht anfassen, neue Version als `<name>_ilias_<YYYY-MM-DD>.<ext>` daneben legen
+* Datei in ILIAS nach dem Herunterladen geändert (Änderungsdatum oder Größe anders): **nicht automatisch laden** (Vorgabe des Nutzers), nur als `ilias_changed` im Index vermerken und in der App melden. Der Nutzer lädt selbst per Klick, dann kommt die neue Version als `<name>_ilias_<YYYY-MM-DD>.<ext>` neben die vorhandene Datei, die unverändert bleibt. Oder er ignoriert die Änderung
+* Lokale Datei vom Nutzer verändert (Hash weicht vom Index ab): nie anfassen, Status `user_modified`
 * Datei vom Nutzer verschoben oder gelöscht (laut Index schon geladen): **nicht erneut laden**. In der GUI gibt es "Erneut herunterladen" pro Datei
 * Ordner aus `[ignore]` werden nie betreten oder beschrieben
 * Dry Run Modus: zeigt geplante Aktionen, schreibt nichts
@@ -336,7 +336,7 @@ SQLite im Datenverzeichnis. Tabelle `items`:
 
 `ref_id, course_ref_id, type, ilias_path, local_path, ilias_mtime, size, sha256, downloaded_at, status`
 
-Status: `ok`, `updated`, `user_modified`, `user_removed`, `error`. Tabelle `sync_runs` mit Start, Ende, Anzahl neu/aktualisiert/Fehler.
+Status: `ok`, `updated`, `user_modified`, `user_removed`, `error`, `ilias_changed` (neue ILIAS Version wartet auf den Nutzer). Tabelle `sync_runs` mit Start, Ende, Anzahl neu/aktualisiert/Fehler.
 
 ## GUI
 
@@ -400,7 +400,7 @@ Sync läuft immer in einem Worker Thread (`QThread`), die GUI blockiert nie.
 
 Nach jedem Meilenstein lauffähig und getestet, bevor der nächste beginnt.
 
-**Stand (2026-09-24)**: Meilenstein 1 und 2 fertig, Crawler mit 3 parallelen Abrufen und automatischem Relogin. Meilenstein 4 (Mapper) vorgezogen und weitgehend fertig, weil der Downloader die Zielpfade braucht. Von Meilenstein 3 gibt es den einfachen Downloader (`.part`, atomar, nie überschreiben) und `--test-sync`, der in `01_Universität_Mannheim\_ILIAS_Sync_Test` einsortiert. Es fehlen noch Status Index (`state.py`), Versionierung (`_alt_`, `_ilias_`), `--dry-run` und `--sync`. **Der echte `01_SEMESTER` wird bis zur Fertigstellung nur gelesen** (Vorgabe des Nutzers). GUI (Meilenstein 6) läuft parallel auf Branch `gui` gegen das Fake Backend.
+**Stand (2026-09-24)**: Meilenstein 1 und 2 fertig, Crawler mit 3 parallelen Abrufen und automatischem Relogin. Meilenstein 4 (Mapper) vorgezogen und weitgehend fertig, weil der Downloader die Zielpfade braucht. Von Meilenstein 3 gibt es den einfachen Downloader (`.part`, atomar, nie überschreiben) und `--test-sync`, der in `01_Universität_Mannheim\_ILIAS_Sync_Test` einsortiert. Status Index (`state.py`) steht. Es fehlen noch Erkennung geänderter Dateien (nur melden, siehe Downloadregeln), `--dry-run` und `--sync`. **Der echte `01_SEMESTER` wird bis zur Fertigstellung nur gelesen** (Vorgabe des Nutzers). GUI (Meilenstein 6) läuft parallel auf Branch `gui` gegen das Fake Backend.
 
 Offene Entscheidungen des Nutzers (nach dem Test Sync):
 * PI1 Vorlesung: eigene Ordner (`01_Vorlesung_grundlagen_programmiereung`, `02_Vorlesung_grundlagen_Java`) heißen anders als in ILIAS (`01 Vom Problem zum Programm` ...), der Mapper legt die ILIAS Ordner daneben an. Umbenennen oder Config Regeln?

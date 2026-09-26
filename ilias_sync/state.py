@@ -12,6 +12,9 @@ Dateien (nicht erneut laden).
     angezeigt). Änderungen in ILIAS erkennt der Sync durch Vergleich mit dem
     nächsten Crawl, nicht mit der lokalen Datei
   * sha256 ist der Hash der Datei, wie sie geladen wurde
+  * Ändert sich eine Datei in ILIAS, wird sie nicht automatisch geladen. Der Index
+    vermerkt Status ilias_changed mit Datum und Größe der neuen Version
+    (new_mtime, new_size), bis der Nutzer sie lädt oder die Änderung ignoriert
 
 Alle Methoden sind threadsicher, Downloads laufen parallel.
 """
@@ -28,7 +31,7 @@ from pathlib import Path, PurePosixPath
 from .config import data_dir
 
 SCHEMA_VERSION = 1
-STATUSES = ("ok", "updated", "user_modified", "user_removed", "error")
+STATUSES = ("ok", "updated", "user_modified", "user_removed", "error", "ilias_changed")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS items (
@@ -41,7 +44,10 @@ CREATE TABLE IF NOT EXISTS items (
     size          INTEGER,
     sha256        TEXT,
     downloaded_at TEXT    NOT NULL,
-    status        TEXT    NOT NULL
+    status        TEXT    NOT NULL,
+    new_mtime     TEXT,
+    new_size      INTEGER,
+    detected_at   TEXT
 );
 CREATE INDEX IF NOT EXISTS items_course ON items (course_ref_id);
 CREATE INDEX IF NOT EXISTS items_downloaded ON items (downloaded_at);
@@ -95,6 +101,9 @@ class Item:
     sha256: str | None
     downloaded_at: datetime
     status: str
+    new_mtime: datetime | None = None    # nur bei ilias_changed: neue Version in ILIAS
+    new_size: int | None = None
+    detected_at: datetime | None = None
 
     def __post_init__(self) -> None:
         if self.status not in STATUSES:
@@ -153,6 +162,9 @@ class State:
             sha256=row["sha256"],
             downloaded_at=_dt(row["downloaded_at"]),
             status=row["status"],
+            new_mtime=_dt(row["new_mtime"]),
+            new_size=row["new_size"],
+            detected_at=_dt(row["detected_at"]),
         )
 
     def get(self, ref_id: int) -> Item | None:
@@ -166,15 +178,47 @@ class State:
             item.ref_id, item.course_ref_id, item.type, item.ilias_path, item.local_path,
             item.ilias_mtime.isoformat() if item.ilias_mtime else None, item.size, item.sha256,
             item.downloaded_at.isoformat(), item.status,
+            item.new_mtime.isoformat() if item.new_mtime else None, item.new_size,
+            item.detected_at.isoformat() if item.detected_at else None,
         )
         with self._lock, self._db:
-            self._db.execute("INSERT OR REPLACE INTO items VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", values)
+            self._db.execute("INSERT OR REPLACE INTO items VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", values)
 
     def set_status(self, ref_id: int, status: str) -> None:
         if status not in STATUSES:
             raise ValueError(f"Unbekannter Status: {status}")
         with self._lock, self._db:
             self._db.execute("UPDATE items SET status = ? WHERE ref_id = ?", (status, ref_id))
+
+    def mark_changed(self, ref_id: int, new_mtime: datetime | None, new_size: int | None,
+                     detected_at: datetime | None = None) -> bool:
+        """Neue ILIAS Version vermerken. True, wenn die Änderung neu ist (für die Benachrichtigung)."""
+        detected_at = detected_at or datetime.now()
+        new = (new_mtime.isoformat() if new_mtime else None, new_size)
+        with self._lock, self._db:
+            row = self._db.execute(
+                "SELECT status, new_mtime, new_size FROM items WHERE ref_id = ?", (ref_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(ref_id)
+            if row["status"] == "ilias_changed" and (row["new_mtime"], row["new_size"]) == new:
+                return False
+            self._db.execute(
+                "UPDATE items SET status = 'ilias_changed', new_mtime = ?, new_size = ?, detected_at = ? "
+                "WHERE ref_id = ?",
+                (*new, detected_at.isoformat(), ref_id),
+            )
+        return True
+
+    def dismiss_changed(self, ref_id: int) -> None:
+        """Änderung ignorieren: neue ILIAS Werte gelten als bekannt, lokale Datei bleibt wie sie ist."""
+        with self._lock, self._db:
+            self._db.execute(
+                "UPDATE items SET ilias_mtime = new_mtime, size = new_size, status = 'ok', "
+                "new_mtime = NULL, new_size = NULL, detected_at = NULL "
+                "WHERE ref_id = ? AND status = 'ilias_changed'",
+                (ref_id,),
+            )
 
     def items(self, status: str | None = None, course_ref_id: int | None = None) -> list[Item]:
         sql, args = "SELECT * FROM items WHERE 1", []

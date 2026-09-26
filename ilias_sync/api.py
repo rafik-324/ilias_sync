@@ -35,12 +35,15 @@ class ItemStatus(Enum):
     USER_MODIFIED = "user_modified"
     USER_REMOVED = "user_removed"
     ERROR = "error"
+    ILIAS_CHANGED = "ilias_changed"  # in ILIAS geändert, neue Version noch nicht geladen (Nutzer entscheidet)
 
 
 class ActionKind(Enum):
     NEW = "new"                    # neue Datei
-    UPDATE = "update"              # ILIAS Version neuer, alte lokal zu *_alt_<Datum>
-    CONFLICT = "conflict"          # Nutzer hat lokal geändert, neue als *_ilias_<Datum>
+    # CHANGED = "changed" (in ILIAS geändert, nur gemeldet) laut GUI_KONTEXT.md trägt der GUI Agent
+    # zusammen mit den Texten in gui/widgets.py und gui/logic.py ein
+    UPDATE = "update"              # veraltet, wird vom Backend nicht mehr erzeugt
+    CONFLICT = "conflict"          # veraltet, wird vom Backend nicht mehr erzeugt
     SKIP_REMOVED = "skip_removed"  # vom Nutzer entfernt, wird nicht geladen
     SKIP_IGNORED = "skip_ignored"  # liegt in [ignore]
     CREATE_DIR = "create_dir"
@@ -130,6 +133,18 @@ class DownloadedFile:
 
 
 @dataclass
+class ChangedFile:
+    """Datei, die nach dem Herunterladen in ILIAS geändert wurde. Wird nie automatisch geladen."""
+    ref_id: int
+    course_name: str
+    name: str
+    local_path: Path                  # vorhandene lokale Datei (kann inzwischen fehlen)
+    old_mtime: datetime | None        # ILIAS Änderungsdatum der geladenen Version
+    new_mtime: datetime | None        # ILIAS Änderungsdatum der neuen Version
+    new_size: int | None
+    detected_at: datetime
+
+@dataclass
 class SyncRun:
     started_at: datetime
     finished_at: datetime | None
@@ -145,6 +160,7 @@ class SyncResult:
     new_files: list[DownloadedFile]
     new_unassigned_courses: list[IliasCourse]
     errors: list[str]
+    changed_files: list[ChangedFile] = field(default_factory=list)  # in diesem Lauf neu als geändert erkannt
 
 
 @dataclass
@@ -242,6 +258,14 @@ class Api:
     def redownload(self, ref_id: int) -> DownloadedFile:
         raise NotImplementedError
 
+    def download_changed(self, ref_id: int) -> DownloadedFile:
+        """Neue ILIAS Version als <name>_ilias_<YYYY-MM-DD>.<ext> neben die vorhandene Datei legen."""
+        raise NotImplementedError
+
+    def dismiss_changed(self, ref_id: int) -> None:
+        """Änderung ignorieren: nicht mehr melden, bis sich die Datei in ILIAS erneut ändert."""
+        raise NotImplementedError
+
     # Status
     def last_run(self) -> SyncRun | None:
         raise NotImplementedError
@@ -250,6 +274,9 @@ class Api:
         raise NotImplementedError
 
     def removed_items(self) -> list[DownloadedFile]:
+        raise NotImplementedError
+
+    def changed_items(self) -> list[ChangedFile]:
         raise NotImplementedError
 
     # Pfade

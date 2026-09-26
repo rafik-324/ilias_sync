@@ -152,3 +152,48 @@ def test_sha256_file(tmp_path):
 def test_default_location_in_data_dir(monkeypatch, tmp_path):
     monkeypatch.setattr(state, "data_dir", lambda: tmp_path)
     assert state.state_file() == Path(tmp_path) / "state.db"
+
+
+def test_mark_changed_keeps_old_version(db):
+    db.put(item())
+    new_mtime = datetime(2026, 10, 3, 9, 0)
+    assert db.mark_changed(1, new_mtime, 1_600_000, detected_at=datetime(2026, 10, 3, 12, 0))
+    got = db.get(1)
+    assert got.status == "ilias_changed"
+    # Werte der geladenen Version bleiben, die neue steht daneben
+    assert got.ilias_mtime == datetime(2026, 7, 10, 16, 57)
+    assert got.size == 1_500_000
+    assert (got.new_mtime, got.new_size) == (new_mtime, 1_600_000)
+    assert got.detected_at == datetime(2026, 10, 3, 12, 0)
+    assert [i.ref_id for i in db.items(status="ilias_changed")] == [1]
+
+
+def test_mark_changed_reports_only_new_changes(db):
+    db.put(item())
+    assert db.mark_changed(1, datetime(2026, 10, 3), 1)
+    assert not db.mark_changed(1, datetime(2026, 10, 3), 1)
+    # Erneut geändert, bevor der Nutzer reagiert hat
+    assert db.mark_changed(1, datetime(2026, 10, 5), 2)
+    assert db.get(1).new_mtime == datetime(2026, 10, 5)
+
+
+def test_mark_changed_unknown_item(db):
+    with pytest.raises(KeyError):
+        db.mark_changed(99, None, None)
+
+
+def test_dismiss_changed(db):
+    db.put(item())
+    db.mark_changed(1, datetime(2026, 10, 3), 1_600_000)
+    db.dismiss_changed(1)
+    got = db.get(1)
+    assert got.status == "ok"
+    assert (got.ilias_mtime, got.size) == (datetime(2026, 10, 3), 1_600_000)
+    assert got.new_mtime is None and got.new_size is None and got.detected_at is None
+    assert got.sha256 == item().sha256
+
+
+def test_dismiss_only_affects_changed(db):
+    db.put(item(status="user_removed"))
+    db.dismiss_changed(1)
+    assert db.get(1).status == "user_removed"

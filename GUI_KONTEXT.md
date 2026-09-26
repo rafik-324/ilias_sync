@@ -53,6 +53,18 @@ Das ist der Vertrag zwischen GUI und Backend. Der GUI Agent legt ihn **nicht** s
 
 Alle Methoden sind synchron und Qt frei. Langlaufende Methoden nehmen einen `progress` Callback und ein `cancel` Token (`threading.Event`) entgegen. Der Worker übersetzt Callbacks in Qt Signale.
 
+### 3.0 Offene Vertragsänderung für den GUI Agenten (2026-09-26)
+
+Vorgabe des Nutzers: In ILIAS **geänderte** Dateien werden nie automatisch geladen (kein `_alt_` mehr). Die App meldet sie, der Nutzer lädt sie per Klick selbst (neue Version kommt als `<name>_ilias_<Datum>` daneben, die vorhandene Datei bleibt unverändert) oder ignoriert die Änderung. Ganz neue Dateien werden weiter automatisch geladen.
+
+Umzusetzen in der GUI:
+* `ActionKind.CHANGED` in `api.py` eintragen (vom Backend bewusst noch nicht gesetzt, weil `gui/widgets.py` sonst ohne Text für diesen Wert abbricht) und Texte in `widgets.py`/`logic.py` ergänzen: Name "In ILIAS geändert", Erklärung "Neue Version in ILIAS. Wird nicht automatisch geladen, du entscheidest in der Übersicht". `UPDATE` und `CONFLICT` erzeugt das Backend nicht mehr
+* Neu: `ItemStatus.ILIAS_CHANGED`, Datentyp `ChangedFile`, Feld `SyncResult.changed_files`, Methoden `changed_items()`, `download_changed(ref_id)`, `dismiss_changed(ref_id)` (alle unten in 3.1 und 3.2)
+* Übersicht: Bereich "In ILIAS geändert" (6.1), Tray Menü Eintrag mit Anzahl (5), Benachrichtigung (5)
+* `fake_backend.py`: ein paar geänderte Dateien simulieren, `download_changed`/`dismiss_changed` nachbilden
+
+Diesen Abschnitt nach der Umsetzung löschen.
+
 ### 3.1 Datentypen
 
 ```python
@@ -74,11 +86,13 @@ class ItemStatus(Enum):
     USER_MODIFIED = "user_modified"
     USER_REMOVED = "user_removed"
     ERROR = "error"
+    ILIAS_CHANGED = "ilias_changed"  # in ILIAS geändert, neue Version noch nicht geladen (Nutzer entscheidet)
 
 class ActionKind(Enum):
     NEW = "new"                  # neue Datei
-    UPDATE = "update"            # ILIAS Version neuer, alte lokal zu *_alt_<Datum>
-    CONFLICT = "conflict"        # Nutzer hat lokal geändert, neue als *_ilias_<Datum>
+    CHANGED = "changed"          # in ILIAS geändert: wird nur gemeldet, nicht geladen
+    UPDATE = "update"            # veraltet, wird vom Backend nicht mehr erzeugt
+    CONFLICT = "conflict"        # veraltet, wird vom Backend nicht mehr erzeugt
     SKIP_REMOVED = "skip_removed"  # vom Nutzer entfernt, wird nicht geladen
     SKIP_IGNORED = "skip_ignored"  # liegt in [ignore]
     CREATE_DIR = "create_dir"
@@ -159,6 +173,18 @@ class DownloadedFile:
     status: ItemStatus
 
 @dataclass
+class ChangedFile:
+    # nach dem Herunterladen in ILIAS geändert, wird nie automatisch geladen
+    ref_id: int
+    course_name: str
+    name: str
+    local_path: Path                  # vorhandene lokale Datei (kann inzwischen fehlen)
+    old_mtime: datetime | None        # ILIAS Änderungsdatum der geladenen Version
+    new_mtime: datetime | None        # ILIAS Änderungsdatum der neuen Version
+    new_size: int | None
+    detected_at: datetime
+
+@dataclass
 class SyncRun:
     started_at: datetime
     finished_at: datetime | None
@@ -173,6 +199,7 @@ class SyncResult:
     new_files: list[DownloadedFile]
     new_unassigned_courses: list[IliasCourse]
     errors: list[str]                 # bereits nutzerfreundlich formuliert, ohne Geheimnisse
+    changed_files: list[ChangedFile] = field(default_factory=list)  # in diesem Lauf neu als geändert erkannt
 
 @dataclass
 class Progress:
@@ -232,11 +259,16 @@ class Api:
     def dry_run(self, progress: ProgressCallback, cancel: threading.Event) -> list[PlannedAction]: ...
     def sync(self, progress: ProgressCallback, cancel: threading.Event) -> SyncResult: ...
     def redownload(self, ref_id: int) -> DownloadedFile: ...   # "Erneut herunterladen"
+    def download_changed(self, ref_id: int) -> DownloadedFile: ...
+        # neue ILIAS Version als <name>_ilias_<YYYY-MM-DD>.<ext> neben die vorhandene Datei, nie überschreiben
+    def dismiss_changed(self, ref_id: int) -> None: ...
+        # "Ignorieren": nicht mehr melden, bis sich die Datei in ILIAS erneut ändert
 
     # Status (SQLite, schnell)
     def last_run(self) -> SyncRun | None: ...
     def recent_files(self, limit: int = 50) -> list[DownloadedFile]: ...
     def removed_items(self) -> list[DownloadedFile]: ...        # Status user_removed
+    def changed_items(self) -> list[ChangedFile]: ...           # Status ilias_changed
 
     # Pfade
     def root_dir(self) -> Path | None: ...      # base_dir / root_folder_name
@@ -273,6 +305,7 @@ class Api:
 1. **Jetzt synchronisieren** (deaktiviert während Sync; bei Login nötig öffnet es den Login Dialog)
 2. **Letzter Sync: <Zeit> (<n> neue Dateien)** (nicht klickbar). Zeit relativ: "vor 5 Min.", "heute 14:03", "gestern 09:12", sonst Datum
 3. **Neue Dateien ▸** Untermenü mit den letzten 10 Dateien (`recent_files(10)`), Anzeige "Dateiname (Kurs)", Klick öffnet die Datei. Existiert die Datei nicht mehr: Hinweis statt Fehler
+   * Darunter, nur wenn `changed_items()` nicht leer: **<n> Dateien in ILIAS geändert**, Klick öffnet die Übersicht beim Bereich "In ILIAS geändert"
 4. Trenner
 5. **Uni Ordner öffnen** (`root_dir()`)
 6. **Fenster öffnen**
@@ -285,7 +318,7 @@ Linksklick auf das Tray Icon öffnet unter Windows das Fenster. Unter macOS öff
 ### Benachrichtigungen (`QSystemTrayIcon.showMessage`)
 
 * Neue Dateien, gebündelt pro Kurs: "5 neue Dateien in Marketing". Bei mehreren Kursen eine Meldung: "12 neue Dateien in 3 Kursen"
-* Aktualisierte Dateien: "2 Dateien in Marketing aktualisiert"
+* In ILIAS geänderte Dateien (`SyncResult.changed_files`, werden nicht automatisch geladen): "2 Dateien in Marketing wurden in ILIAS geändert". Bei mehreren Kursen: "5 Dateien in 3 Kursen wurden in ILIAS geändert". Klick öffnet die Übersicht beim Bereich "In ILIAS geändert"
 * Neue, nicht zugeordnete Kurse: "Neuer Kurs gefunden: Statistik I. Bitte im Fenster zuordnen." Klick öffnet Tab Kurse
 * Fehler: "Sync fehlgeschlagen: <kurzer Text>". Klick öffnet Tab Log
 * Login nötig: "Anmeldung bei ILIAS nötig". Klick öffnet Login Dialog
@@ -300,6 +333,7 @@ Klein und übersichtlich, Startgröße etwa 800 × 560, Größe und Position wer
 * Buttons: **Jetzt synchronisieren**, **Abbrechen** (nur während Sync sichtbar), **Uni Ordner öffnen**
 * Fortschrittsbalken mit Phase und Detail während eines Syncs
 * Tabelle der zuletzt geladenen Dateien (`recent_files(50)`): Datei, Kurs, Zielordner (relativ zu `root_dir`), Zeit, Status. Doppelklick öffnet die Datei, Kontextmenü: "Datei öffnen", "Ordner öffnen"
+* Bereich **"In ILIAS geändert"** (`changed_items()`), gut sichtbar oberhalb der Dateitabelle, nur wenn nicht leer, mit Anzahl im Titel. Pro Eintrag: Datei, Kurs, alt/neu Änderungsdatum, Buttons **Herunterladen** (`download_changed`, im Worker, legt die neue Version als `<name>_ilias_<Datum>` daneben, die vorhandene Datei bleibt unverändert) und **Ignorieren** (`dismiss_changed`). Zusätzlich "Alle herunterladen". Die Anzahl erscheint auch im Tray Menü ("3 Dateien in ILIAS geändert", Klick öffnet die Übersicht)
 * Aufklappbarer Bereich **"Vom Nutzer entfernt"** (`removed_items()`), pro Eintrag Button **Erneut herunterladen** (`redownload`, im Worker)
 
 ### 6.2 Kurse
