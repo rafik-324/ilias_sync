@@ -9,3 +9,6 @@ dist/
 # Lokale Geheimnisse, niemals committen
 .env
 .env.*
+
+# macOS
+.DS_Store
