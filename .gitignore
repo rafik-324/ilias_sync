@@ -12,3 +12,6 @@ dist/
 
 # macOS
 .DS_Store
+
+# Design Übergaben (Zip), nur die fertigen Assets kommen ins Repo
+*.zip
