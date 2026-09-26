@@ -103,6 +103,24 @@ class ContentsButton(QPushButton):
         popup.show()
 
 
+DIR_COL_MIN = 250
+DIR_COL_MAX = 380
+
+
+def _combo_width(combo: QComboBox) -> int:
+    """Nötige Spaltenbreite für den längsten Eintrag.
+
+    sizeHint berücksichtigt das Stylesheet, zieht aber den Pfeilbereich
+    (padding-right plus drop-down) nur einmal ab, daher 24 px Zuschlag, dazu der Zellrand.
+    """
+    combo.ensurePolished()
+    policy = combo.sizeAdjustPolicy()
+    combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+    width = combo.sizeHint().width()
+    combo.setSizeAdjustPolicy(policy)
+    return width + 24 + 12 + 4
+
+
 def _cell(widget: QWidget, center: bool = False) -> QWidget:
     """Zell Widget mit etwas Luft, damit Eingaben nicht am Rand kleben."""
     cell = QWidget()
@@ -140,7 +158,7 @@ class CoursesTab(Page):
         h = self.table.horizontalHeader()
         h.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         h.setSectionResizeMode(COL_NAME, QHeaderView.ResizeMode.Stretch)
-        for col, width in ((COL_SEM, 92), (COL_DIR, 250), (COL_TYPES, 150), (COL_RULES, 128)):
+        for col, width in ((COL_SEM, 92), (COL_DIR, DIR_COL_MIN), (COL_TYPES, 150), (COL_RULES, 128)):
             h.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
             self.table.setColumnWidth(col, width)
 
@@ -221,6 +239,7 @@ class CoursesTab(Page):
         courses = self._sorted_courses()
         self.table.setRowCount(len(courses))
         unassigned = 0
+        dir_width = DIR_COL_MIN
         for row, course in enumerate(courses):
             sem = semester_of(course.ilias_name, self._pattern())
             name_item = QTableWidgetItem(logic.course_display_name(course.ilias_name, self._pattern()))
@@ -229,7 +248,9 @@ class CoursesTab(Page):
             self.table.setItem(row, COL_NAME, name_item)
             self.table.setItem(row, COL_SEM, QTableWidgetItem(sem or "unbekannt"))
 
-            self.table.setCellWidget(row, COL_DIR, _cell(self._dir_combo(course, sem)))
+            combo = self._dir_combo(course, sem)
+            dir_width = max(dir_width, _combo_width(combo))
+            self.table.setCellWidget(row, COL_DIR, _cell(combo))
 
             self.table.setCellWidget(row, COL_TYPES, _cell(ContentsButton(course, self._set_type)))
 
@@ -242,6 +263,9 @@ class CoursesTab(Page):
                 unassigned += 1
                 name_item.setIcon(QIcon(dot(theme.tokens().warning, 8)))
                 name_item.setToolTip(f"Noch keinem Ordner zugeordnet\n{course.ilias_name}")
+
+        # Spalte so breit, dass lange Ordnernamen nicht abgeschnitten werden
+        self.table.setColumnWidth(COL_DIR, min(dir_width, DIR_COL_MAX))
 
         if unassigned:
             kurs = "Ein Kurs ist" if unassigned == 1 else f"{unassigned} Kurse sind"
@@ -296,6 +320,8 @@ class CoursesTab(Page):
         idx = combo.findData(course.local_dir) if course.local_dir else 0
         combo.setCurrentIndex(max(idx, 0))
         combo.setProperty("previous", combo.currentIndex())
+        combo.setToolTip(combo.currentText())
+        combo.currentTextChanged.connect(combo.setToolTip)
         combo.currentIndexChanged.connect(lambda _i, c=course, cb=combo, e=existing: self._dir_chosen(c, cb, e))
         return combo
 

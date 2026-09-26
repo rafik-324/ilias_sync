@@ -20,6 +20,9 @@ from PySide6.QtWidgets import QApplication, QWidget
 
 from ilias_sync.gui.icons import is_dark_mode
 
+# Nur Schriften des jeweiligen Systems nennen, fehlende Familien kosten Qt beim Start Zeit
+MONO = 'Menlo, monospace' if sys.platform == "darwin" else '"Cascadia Mono", Consolas, monospace'
+
 
 @dataclass(frozen=True)
 class Tokens:
@@ -185,7 +188,7 @@ QLabel[role="warning"] {{ color: {t.warning}; }}
 QLabel[role="hero"] {{ font-size: 20px; font-weight: 600; }}
 QLabel[role="stat"] {{ font-size: 22px; font-weight: 600; }}
 QLabel[role="code"] {{
-    font-family: "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace; font-size: 12px;
+    font-family: {MONO}; font-size: 12px;
     background: {t.surface2}; border: 1px solid {t.border}; border-radius: 8px; padding: 10px 12px;
 }}
 QLabel[role="banner"] {{
@@ -290,7 +293,7 @@ QTableCornerButton::section {{ background: {t.surface}; border: none; }}
 
 QPlainTextEdit#logView {{
     background: transparent; border: none; padding: 8px 10px;
-    font-family: "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace; font-size: 12px;
+    font-family: {MONO}; font-size: 12px;
 }}
 
 /* Fortschritt */
