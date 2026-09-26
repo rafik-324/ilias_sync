@@ -368,3 +368,20 @@ def test_fetch_courses_uses_dashboard_heading_for_groups(env, monkeypatch):
     monkeypatch.setattr(crawler.Crawler, "fetch_courses", lambda self: [COURSE, group])
     courses = api.fetch_courses(noop, threading.Event())
     assert [c.semester for c in courses] == ["HWS 2026", "HWS 2026"]
+
+
+def test_sync_result_is_logged(env, caplog, monkeypatch):
+    api, base, passwords, _ = env
+    setup_account(api, base, passwords)
+    with caplog.at_level("INFO", logger="ilias_sync.backend"):
+        api.sync(noop, threading.Event())
+    assert any("Sync fertig: 1 neu, 0 in ILIAS geändert, 0 Fehler, Dauer" in r.message for r in caplog.records)
+
+    def cancelled(cfg, s, progress, cancel):
+        raise crawler.CrawlCancelled()
+
+    monkeypatch.setattr(api, "_crawl", cancelled)
+    caplog.clear()
+    with caplog.at_level("INFO", logger="ilias_sync.backend"), pytest.raises(Cancelled):
+        api.sync(noop, threading.Event())
+    assert any("Sync abgebrochen nach" in r.message for r in caplog.records)

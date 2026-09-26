@@ -156,3 +156,33 @@ def test_course_without_rules_roundtrip(cfg_path):
     cfg = Config(base_dir=Path("/tmp/uni"), courses=[CourseConfig(ref_id=5, ilias_name="X", local_dir=None)])
     config.save_config(cfg, cfg_path)
     assert config.load_config(cfg_path) == cfg
+
+
+def test_home_override_redirects_all_paths(monkeypatch, tmp_path):
+    from ilias_sync import auth, state
+
+    monkeypatch.setenv(config.HOME_ENV, str(tmp_path / "test_home"))
+    home = tmp_path / "test_home"
+    assert config.config_file() == home / "config" / "config.toml"
+    assert config.data_dir() == home / "data"
+    assert config.log_dir() == home / "logs"
+    assert auth.cookie_file() == home / "data" / "cookies.txt"
+    assert state.db_file(config.data_dir(), tmp_path / "Uni").parent == home / "data"
+
+
+def test_without_override_standard_paths(monkeypatch):
+    monkeypatch.delenv(config.HOME_ENV, raising=False)
+    assert config.home_override() is None
+    assert "ilias-sync" in str(config.config_dir())
+    monkeypatch.setenv(config.HOME_ENV, "  ")
+    assert config.home_override() is None
+
+
+def test_cli_config_dir_sets_home(monkeypatch, tmp_path):
+    from ilias_sync import __main__ as cli
+
+    monkeypatch.delenv(config.HOME_ENV, raising=False)
+    monkeypatch.setattr(cli, "setup_logging", lambda verbose=False: tmp_path / "x.log")
+    monkeypatch.setattr(cli, "cmd_status", lambda: 0)
+    assert cli.main(["--config-dir", str(tmp_path / "h"), "--status"]) == 0
+    assert config.config_file() == (tmp_path / "h").resolve() / "config" / "config.toml"

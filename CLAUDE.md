@@ -57,6 +57,7 @@ Das Repo liegt in OneDrive und wird auf beiden Rechnern genutzt. Zuerst per `una
 
 ### Python Umgebung
 
+* Getrennte Testumgebung: Umgebungsvariable `ILIAS_SYNC_HOME` bzw. CLI `--config-dir ORDNER` lenkt Config, Daten (Index, Cookies) und Log nach `<ORDNER>/config`, `/data`, `/logs`. Schlüsselbund bleibt gleich
 * Eine gemeinsame venv pro Rechner für beide Agenten, alle Pakete aus `requirements-dev.txt`. Nicht im Projektordner, weil OneDrive sonst tausende Dateien synchronisiert
 * Windows: `C:\Users\rafik\.venvs\ilias-sync` (Python 3.13). `python` im PATH ist nur der Microsoft Store Alias, daher immer den vollen Pfad nutzen: `C:\Users\rafik\.venvs\ilias-sync\Scripts\python.exe -m pytest`
 * macOS: `~/.venvs/ilias-sync` (Homebrew Python 3.12). `/usr/bin/python3` ist 3.9 und zu alt, daher immer `~/.venvs/ilias-sync/bin/python -m pytest`
@@ -402,6 +403,15 @@ Sync läuft immer in einem Worker Thread (`QThread`), die GUI blockiert nie.
 * **macOS (Stand 2026-09-26)**: `packaging/ilias_sync_macos.spec` mit Startdatei `packaging/launcher.py` (`__main__.py` nutzt relative Importe und taugt nicht als Skript). Bauen immer nach außerhalb von OneDrive:
   `~/.venvs/ilias-sync/bin/pyinstaller packaging/ilias_sync_macos.spec --noconfirm --distpath ~/dev/ilias_sync-build/dist --workpath ~/dev/ilias_sync-build/build`.
   Ergebnis `ILIAS Sync.app` (etwa 104 MB, Bundle ID `de.rafik.ilias-sync`, `LSUIElement`, noch ohne eigenes Icon und unsigniert). Geprüft: startet ohne Dock Icon (`lsappinfo`: UIElement), Schlüsselbund im Bundle funktioniert, `--status` zeigt Pfade, Schlüsselbund, Session und den Autostart Befehl (zeigt auf das Programm in der `.app`). Autostart erst einschalten, wenn die App an ihrem endgültigen Ort liegt (z. B. `/Applications`), sonst zeigt der LaunchAgent ins Leere
+
+### Weitergabe an Kommilitonen (vorgemerkt, erst wenn das Programm fertig ist)
+
+Entscheidung des Nutzers 2026-09-26: Kollegen sollen die Mac App über die private Webseite des Nutzers laden können. Kein Apple Developer Account (zu teuer), also keine Notarisierung.
+* Release Skript: App bauen, als `ILIAS-Sync-<version>.dmg` packen (App plus Verknüpfung zu Programme), SHA-256 Prüfsumme daneben. Signatur bleibt ad hoc (reicht auf Apple Silicon zum Starten)
+* Anleitungstext auf Deutsch für die Webseite: DMG öffnen, App nach Programme ziehen, beim ersten Start einmal Systemeinstellungen → Datenschutz & Sicherheit → "Trotzdem öffnen" (Alternative `xattr -dr com.apple.quarantine`)
+* Hochladen macht der Nutzer selbst, das Tool hat keinen Zugriff auf die Webseite
+* Offen: Universal Build für Intel Macs nötig? (braucht Python von python.org statt Homebrew)
+* Jeder nutzt seine eigene Uni-ID, es werden keine Materialien weitergegeben (siehe Rechtliches)
 
 ## Meilensteine
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import logging
+import os
 import sys
 import threading
 import time
@@ -506,7 +507,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="nur diesen Kurs crawlen (mehrfach möglich)")
     parser.add_argument("--output", type=Path, metavar="DATEI", help="Ausgabe zusätzlich in Datei speichern")
     parser.add_argument("-v", "--verbose", action="store_true", help="ausführliche Ausgabe")
+    parser.add_argument("--config-dir", type=Path, metavar="ORDNER",
+                        help=f"Config, Daten und Log in ORDNER statt im Standard Ort (wie {config.HOME_ENV})")
     args = parser.parse_args(argv)
+    if args.config_dir:
+        # Vor allem anderen setzen, alle Pfade werden bei Bedarf daraus gelesen
+        os.environ[config.HOME_ENV] = str(args.config_dir.expanduser().resolve())
 
     log_file = setup_logging(args.verbose)
     log.debug("Log Datei: %s", log_file)
