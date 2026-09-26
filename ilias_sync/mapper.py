@@ -402,7 +402,13 @@ class Mapper:
     def map_course(self, course: Course, semester_dirs: dict[str, str]) -> CourseMapping:
         semester = course_semester(course)
         if semester is None:
+            # Kurse ohne Semester (z. B. Lizenzkurs): ILIAS Struktur 1:1 unter _ohne_semester.
+            # Mit Config Eintrag gilt dessen Ordner, damit die Schalter pro Kurs greifen
             top = self.resolve_folder((), NO_SEMESTER_DIR)
+            configured = self.config_courses.get(course.ref_id)
+            if configured and configured.local_dir:
+                return CourseMapping(course, None, top, configured.local_dir,
+                                     self._exists((top,), configured.local_dir), "ohne Semester")
             return CourseMapping(course, None, top, self.resolve_folder((top,), course.name), False, "ohne Semester")
         semester_dir = semester_dirs[semester]
         configured = self.config_courses.get(course.ref_id)
@@ -441,6 +447,10 @@ class Mapper:
         planned: dict[tuple[str, tuple[str, ...]], str] = {}   # (Semesterordner, Kurswörter) -> Ordner
         suggestions: list[CourseConfig] = []
         for course, cm in zip(courses, mappings):
+            if cm.source == "ohne Semester" and course.ref_id not in self.config_courses:
+                # Eigener Config Eintrag, damit der Kurs in der GUI erscheint und abschaltbar ist
+                suggestions.append(CourseConfig(ref_id=course.ref_id, ilias_name=course.name, local_dir=cm.course_dir))
+                continue
             if cm.source != "neu":
                 continue
             key = (cm.semester_dir, tuple(ilias_course_words(course.name, self.cfg.semester_pattern)))

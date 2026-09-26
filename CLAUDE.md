@@ -268,7 +268,7 @@ Enthält ein Name Schlüsselwörter mehrerer Kategorien (z. B. `Linux: Folien un
 
 * Ein ILIAS Ordner, der nur die Kategorie benennt (`Vorlesung`, `Tutorien`, `Vorlesungsfolien`, `Große Übung`), wird selbst zum Kategorieordner. Trägt er mehr im Namen (`Übung 01`, `Tutorium_1`, `Linux: Folien und Übung`), bleibt er als Unterordner der Kategorie erhalten
 * Ignore Muster gelten auf jeder Ebene: soll ein neuer Ordner so heißen, bekommt er den Zusatz ` (ILIAS)`
-* Kurse ohne erkennbares Semester (z. B. MSDNAA Lizenzkurs) landen unter `_Ohne_Semester/<ILIAS Kursname>/`
+* Kurse ohne erkennbares Semester (z. B. MSDNAA Lizenzkurs) landen unter `_ohne_semester/<kursordner>/` (vorhandenes `_Ohne_Semester` wird weiter benutzt), ILIAS Struktur 1:1 ohne Kategorien. Sie bekommen wie andere Kurse einen Config Eintrag (Entscheidung des Nutzers 2026-09-26), damit sie in der GUI erscheinen und per `download_*` Schalter abschaltbar sind
 
 * Existiert lokal bereits ein passender Ordner (Vergleich ohne Nummernpräfix, ohne Groß/Kleinschreibung, Umlaute normalisiert), **diesen verwenden**. Also `02_tutorium` wird für Kategorie Tutorium genutzt, kein zweiter Ordner angelegt
 * Existiert keiner: neuen Ordner mit nächster freier Nummer anlegen, Schreibweise nach Mehrheit im Kurs (z. B. `03_Tutorium`)
