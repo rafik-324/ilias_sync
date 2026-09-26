@@ -33,8 +33,12 @@ Backend und GUI werden parallel von zwei Claude Sitzungen entwickelt. Jede hat i
 
 | Ordner | Branch | Wer |
 |---|---|---|
-| `C:\Users\rafik\OneDrive\01_Universität_Mannheim\code_projects\Ilias_getter` | `main` | Backend Agent |
-| `C:\Users\rafik\dev\ilias_sync-gui` (außerhalb von OneDrive) | `gui` | GUI Agent |
+| Windows: `C:\Users\rafik\OneDrive\01_Universität_Mannheim\code_projects\Ilias_getter` | `main` | Backend Agent |
+| macOS: `/Users/rafik/Library/CloudStorage/OneDrive-Persönlich/01_Universität_Mannheim/code_projects/Ilias_getter` | `main` | Backend Agent |
+| Windows: `C:\Users\rafik\dev\ilias_sync-gui` (außerhalb von OneDrive) | `gui` | GUI Agent |
+| macOS: noch nicht eingerichtet (geplant `~/dev/ilias_sync-gui`) | `gui` | GUI Agent |
+
+Das Repo liegt in OneDrive und wird auf beiden Rechnern genutzt. Zuerst per `uname` bzw. Plattform prüfen, auf welchem System die Sitzung läuft, und nur die Pfade dieses Systems verwenden. Worktree Einträge des anderen Systems erscheinen bei `git worktree list` als `prunable`: **nie `git worktree prune` ausführen**, sonst ist der Worktree auf dem anderen Rechner kaputt. Den Ordner `tests 2` (OneDrive Konfliktkopie) ignorieren.
 
 * Nur im eigenen Ordner lesen, schreiben, testen und Git Befehle ausführen, immer mit absoluten Pfaden
 * Gemeinsame Dateien (`api.py` Vertrag, `GUI_KONTEXT.md`, `CLAUDE.md`, `requirements*.txt`, `pyproject.toml`) nur klein ändern und in der Commit Nachricht erwähnen
@@ -49,8 +53,11 @@ Backend und GUI werden parallel von zwei Claude Sitzungen entwickelt. Jede hat i
 
 ### Python Umgebung
 
-* Eine gemeinsame venv für beide Agenten: `C:\Users\rafik\.venvs\ilias-sync` (Python 3.13, alle Pakete aus `requirements-dev.txt`). Nicht im Projektordner, weil OneDrive sonst tausende Dateien synchronisiert
-* `python` im PATH ist nur der Microsoft Store Alias, daher immer den vollen Pfad nutzen: `C:\Users\rafik\.venvs\ilias-sync\Scripts\python.exe -m pytest`
+* Eine gemeinsame venv pro Rechner für beide Agenten, alle Pakete aus `requirements-dev.txt`. Nicht im Projektordner, weil OneDrive sonst tausende Dateien synchronisiert
+* Windows: `C:\Users\rafik\.venvs\ilias-sync` (Python 3.13). `python` im PATH ist nur der Microsoft Store Alias, daher immer den vollen Pfad nutzen: `C:\Users\rafik\.venvs\ilias-sync\Scripts\python.exe -m pytest`
+* macOS: `~/.venvs/ilias-sync` (Homebrew Python 3.12). `/usr/bin/python3` ist 3.9 und zu alt, daher immer `~/.venvs/ilias-sync/bin/python -m pytest`
+* macOS Pfade der App: Config und Daten (`config.toml`, `cookies.txt`) in `~/Library/Application Support/ilias-sync`, Log in `~/Library/Logs/ilias-sync`, Passwort im Schlüsselbund. Der Ordner `ilias-getter` dort stammt von einem alten Prototyp und wird nicht benutzt
+* CLI Befehle mit Passworteingabe (`--login`) führt der Nutzer selbst aus (in Claude Code mit `!` Präfix)
 * Tests immer aus dem eigenen Worktree starten, damit dessen Code getestet wird (`pythonpath = ["."]` in `pyproject.toml`)
 
 ## Architektur
