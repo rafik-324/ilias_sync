@@ -42,7 +42,7 @@ class MainWindow(QMainWindow):
         self.c = controller
         self.setWindowTitle("ILIAS Sync")
         self.setWindowIcon(app_icon())
-        self.resize(1040, 680)
+        self.resize(1040, 760)   # Platz für "In ILIAS geändert" und mehrere zuletzt geladene Dateien
         self.setMinimumSize(820, 520)
 
         self.overview = OverviewTab(controller)
