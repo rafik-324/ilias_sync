@@ -8,15 +8,18 @@ Ablauf pro Datei:
      einloggen und wiederholen
   4. Erst nach vollständigem Download atomar umbenennen (os.replace)
 
-Status Index und Versionierung (_alt_, _ilias_) folgen mit Meilenstein 3.
+Der Hash (SHA-256) entsteht beim Schreiben, für den Status Index. Neue ILIAS
+Versionen einer vorhandenen Datei legt der Aufrufer über versioned_path daneben.
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 import requests
@@ -41,10 +44,22 @@ class DownloadResult:
     status: str        # "neu", "vorhanden", "fehler"
     size: int = 0
     error: str | None = None
+    sha256: str | None = None   # nur bei status "neu"
 
 
 def part_path(target: Path) -> Path:
     return target.with_name(target.name + ".part")
+
+
+def versioned_path(existing: Path, day: date, tag: str = "ilias") -> Path:
+    """<name>_ilias_<YYYY-MM-DD>.<ext> neben existing, bei Bedarf mit _2, _3 ... bis der Name frei ist."""
+    base = f"{existing.stem}_{tag}_{day:%Y-%m-%d}"
+    candidate = existing.with_name(base + existing.suffix)
+    n = 2
+    while candidate.exists() or part_path(candidate).exists():
+        candidate = existing.with_name(f"{base}_{n}{existing.suffix}")
+        n += 1
+    return candidate
 
 
 def _looks_like_login_page(r: requests.Response, target: Path) -> bool:
@@ -82,9 +97,11 @@ def download_file(
                         continue
                     raise DownloadError("ILIAS lieferte eine Webseite statt der Datei (Session abgelaufen?)")
                 size = 0
+                digest = hashlib.sha256()
                 with open(part, "wb") as f:
                     for chunk in r.iter_content(CHUNK_SIZE):
                         f.write(chunk)
+                        digest.update(chunk)
                         size += len(chunk)
             break
         # Zwischen Prüfung und Umbenennen könnte der Nutzer eine Datei angelegt haben
@@ -92,7 +109,7 @@ def download_file(
             part.unlink(missing_ok=True)
             return DownloadResult(target, "vorhanden")
         os.replace(part, target)
-        return DownloadResult(target, "neu", size=size)
+        return DownloadResult(target, "neu", size=size, sha256=digest.hexdigest())
     except (requests.RequestException, OSError, DownloadError) as e:
         part.unlink(missing_ok=True)
         message = str(e) if isinstance(e, DownloadError) else type(e).__name__

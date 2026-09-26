@@ -23,6 +23,7 @@ def item(ref_id: int = 1, **kw) -> Item:
         sha256="ab" * 32,
         downloaded_at=datetime(2026, 9, 26, 13, 5),
         status="ok",
+        url="https://ilias.uni-mannheim.de/goto.php/file/1/download",
     )
     values.update(kw)
     return Item(**values)

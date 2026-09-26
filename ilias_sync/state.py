@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS items (
     status        TEXT    NOT NULL,
     new_mtime     TEXT,
     new_size      INTEGER,
-    detected_at   TEXT
+    detected_at   TEXT,
+    url           TEXT
 );
 CREATE INDEX IF NOT EXISTS items_course ON items (course_ref_id);
 CREATE INDEX IF NOT EXISTS items_downloaded ON items (downloaded_at);
@@ -104,6 +105,7 @@ class Item:
     new_mtime: datetime | None = None    # nur bei ilias_changed: neue Version in ILIAS
     new_size: int | None = None
     detected_at: datetime | None = None
+    url: str | None = None               # Download URL aus dem letzten Crawl
 
     def __post_init__(self) -> None:
         if self.status not in STATUSES:
@@ -165,6 +167,7 @@ class State:
             new_mtime=_dt(row["new_mtime"]),
             new_size=row["new_size"],
             detected_at=_dt(row["detected_at"]),
+            url=row["url"],
         )
 
     def get(self, ref_id: int) -> Item | None:
@@ -179,10 +182,10 @@ class State:
             item.ilias_mtime.isoformat() if item.ilias_mtime else None, item.size, item.sha256,
             item.downloaded_at.isoformat(), item.status,
             item.new_mtime.isoformat() if item.new_mtime else None, item.new_size,
-            item.detected_at.isoformat() if item.detected_at else None,
+            item.detected_at.isoformat() if item.detected_at else None, item.url,
         )
         with self._lock, self._db:
-            self._db.execute("INSERT OR REPLACE INTO items VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", values)
+            self._db.execute("INSERT OR REPLACE INTO items VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", values)
 
     def set_status(self, ref_id: int, status: str) -> None:
         if status not in STATUSES:
