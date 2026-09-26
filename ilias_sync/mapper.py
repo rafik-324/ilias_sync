@@ -28,7 +28,7 @@ from pathlib import Path
 
 from .api import Config, CourseConfig
 from .crawler import Course, CrawlResult, IliasObject
-from .platform_utils import linux_name, nfc
+from .platform_utils import linux_name, nfc, short_dir_name
 
 log = logging.getLogger(__name__)
 
@@ -219,7 +219,7 @@ def course_dir_name(ilias_name: str, semester_pattern: str) -> str:
     # Kurz halten: Untertitel nach ":" und Modulkürzel wie "IS 201" am Anfang weglassen
     name = name.split(":", 1)[0]
     name = re.sub(r"^\s*[A-Z]{2,5}\s?\d{2,4}[a-z]?\s+", " ", name)
-    name = linux_name(name).strip("._-")
+    name = short_dir_name(linux_name(name).strip("._-"))
     return name or "kurs"
 
 
@@ -344,15 +344,17 @@ class Mapper:
         if cache_key in self._resolved:
             return self._resolved[cache_key]
         key = folder_key(ilias_name)
+        short = short_dir_name(linux_name(ilias_name))
         local = self.tree.subdirs(parent)
-        existing = [d for d in local if folder_key(d) == key]
+        # Vorhandenen Ordner nutzen: ungekürzt (alter Stand) oder schon gekürzt angelegt
+        existing = [d for d in local if folder_key(d) == key or d == short]
         if not existing:
             loose = loose_folder_key(ilias_name)
             existing = [d for d in local if loose_folder_key(d) == loose]
         if existing:
             name = existing[0]
         else:
-            name = linux_name(ilias_name)
+            name = short
             if is_ignored(name, self.cfg.ignore_local_dirs):
                 # Nie in einen ignorierten Ordner schreiben
                 name = f"{name}_ilias"

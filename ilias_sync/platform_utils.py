@@ -8,6 +8,7 @@ auf beiden Systemen gleich aussieht.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import plistlib
 import re
@@ -63,6 +64,29 @@ def linux_name(name: str) -> str:
     name = re.sub(r"\.[_-]+", ".", name)
     name = name.lstrip(".-").rstrip("._-")
     return sanitize_name(name) if name else "_"
+
+
+# Neu angelegte Ordner höchstens so lang, damit auch tiefe ILIAS Strukturen unter einem
+# langen Basisordner (z. B. in OneDrive) unter MAX_PATH_LENGTH bleiben
+MAX_DIR_NAME = 40
+
+
+def short_dir_name(name: str, limit: int = MAX_DIR_NAME) -> str:
+    """Zu langen neuen Ordnernamen kürzen, stabil: am Wortende abschneiden und einen kurzen
+    Hash des vollen Namens anhängen. Gleicher Name ergibt immer dasselbe Ergebnis, zwei
+    verschiedene lange Namen mit gleichem Anfang kollidieren nicht.
+    "09a_objektorientierte_programmierung_fortgeschrittene_konzepte" -> "09a_objektorientierte_programmierung_1c2d"."""
+    if len(name) <= limit:
+        return name
+    tag = hashlib.sha256(nfc(name).encode("utf-8")).hexdigest()[:4]
+    room = limit - len(tag) - 1
+    cut = name[:room]
+    # Endet der Schnitt genau vor einem Trenner, bleibt das letzte Wort ganz
+    if name[room] not in "_- ":
+        boundary = max(cut.rfind("_"), cut.rfind("-"), cut.rfind(" "))
+        if boundary >= room // 2:
+            cut = cut[:boundary]
+    return f"{cut.rstrip('._- ')}_{tag}"
 
 
 def fit_path(path: Path, limit: int = MAX_PATH_LENGTH) -> Path:

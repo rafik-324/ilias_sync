@@ -272,7 +272,7 @@ def test_existing_deeper_folder_found_despite_other_number(root):
         "01_SEMESTER/02_praktische_informatik_I/01_Vorlesung/01 Einführung/e.pdf"
     # Doppelpunkt ist unter Windows verboten
     assert paths["Vorlesung / 07 Objektorientierte Programmierung: Einführung / O.pdf"] == \
-        "01_SEMESTER/02_praktische_informatik_I/01_Vorlesung/07_objektorientierte_programmierung_einfuehrung/o.pdf"
+        "01_SEMESTER/02_praktische_informatik_I/01_Vorlesung/07_objektorientierte_programmierung_79f4/o.pdf"
 
 
 def test_uebungsblaetter_folder_used_when_present(root):
@@ -385,7 +385,7 @@ def test_course_dir_name():
                                   PATTERN) == "wirtschaftsinformatik_i"
     assert mapper.course_dir_name("CS 560 Datenbanken I [V] (FSS 2027)", PATTERN) == "datenbanken_i"
     assert mapper.course_dir_name("Mathematik I für Wirtschaftsinformatiker [V] (HWS 2026)", PATTERN) \
-        == "mathematik_i_fuer_wirtschaftsinformatiker"
+        == "mathematik_i_fuer_5f62"
     assert mapper.course_dir_name("[V] (HWS 2026)", PATTERN) == "kurs"
 
 
@@ -405,7 +405,7 @@ def test_suggest_courses_in_empty_root_groups_lectures(tmp_path):
         2: "02_praktische_informatik_i",
         3: "02_praktische_informatik_i",
         # Kurs ohne Semester bekommt auch einen Eintrag (Ordner unter _ohne_semester, ohne Nummer)
-        5: "license_information_student_university_of_mannheim",
+        5: "license_information_student_2051",
         6: "03_programmierpraktikum_i",
     }
 
@@ -537,7 +537,7 @@ def test_course_without_semester_new_folder_follows_linux_rule(tmp_path):
     c = crs(342184, LICENSE, heading="MSDNAA")
     result = CrawlResult([c], {c.ref_id: tree(c, [("file", "Matlab.pdf", 2)])})
     [suggestion] = mapper.Mapper(Config(base_dir=None), tmp_path).suggest_courses(result)
-    assert suggestion.local_dir == "license_information_student_university_of_mannheim"
+    assert suggestion.local_dir == "license_information_student_2051"
 
 
 def test_course_without_semester_can_be_switched_off(tmp_path):

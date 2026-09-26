@@ -13,6 +13,7 @@ Versionierung (_alt_, _ilias_) und Status Index steuert sync.py, hier liegen nur
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import logging
 import os
@@ -90,7 +91,33 @@ def fetch_to_part(
 
 
 def error_text(e: Exception) -> str:
-    return str(e) if isinstance(e, (DownloadError, ValueError)) else type(e).__name__
+    """Verständlicher Fehlertext pro Datei, ohne Klassennamen. Die Ursache steht im Log."""
+    if isinstance(e, (DownloadError, ValueError)):
+        return str(e)
+    if isinstance(e, requests.HTTPError) and e.response is not None:
+        status = e.response.status_code
+        if status in (401, 403):
+            return f"Kein Zugriff in ILIAS (Fehler {status})"
+        if status == 404:
+            return "Datei in ILIAS nicht gefunden (Fehler 404)"
+        if status >= 500:
+            return f"ILIAS hatte ein Serverproblem (Fehler {status}), beim nächsten Sync erneut"
+        return f"ILIAS hat den Download abgelehnt (Fehler {status})"
+    if isinstance(e, requests.exceptions.SSLError):
+        return "Sichere Verbindung zu ILIAS fehlgeschlagen"
+    if isinstance(e, requests.Timeout):
+        return "ILIAS hat nicht rechtzeitig geantwortet, beim nächsten Sync erneut"
+    if isinstance(e, requests.ConnectionError):
+        return "ILIAS war nicht erreichbar, beim nächsten Sync erneut"
+    if isinstance(e, requests.RequestException):
+        return "Download von ILIAS fehlgeschlagen, beim nächsten Sync erneut"
+    if isinstance(e, PermissionError):
+        return "Keine Schreibrechte im Zielordner"
+    if isinstance(e, OSError) and e.errno == errno.ENOSPC:
+        return "Nicht genug Speicherplatz"
+    if isinstance(e, OSError):
+        return "Datei konnte nicht gespeichert werden"
+    return "Unerwarteter Fehler, Details im Log"
 
 
 def download_file(
@@ -119,7 +146,8 @@ def download_file(
         return DownloadResult(target, "neu", size=size, sha256=sha)
     except (requests.RequestException, OSError, DownloadError) as e:
         part.unlink(missing_ok=True)
-        log.warning("Download fehlgeschlagen (%s): %s", target.name, error_text(e))
+        log.warning("Download fehlgeschlagen (%s): %s [%s: %s]", target.name, error_text(e), type(e).__name__,
+                    getattr(e, "errno", "") or getattr(getattr(e, "response", None), "status_code", ""))
         return DownloadResult(target, "fehler", error=error_text(e))
 
 
