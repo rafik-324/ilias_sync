@@ -416,15 +416,15 @@ Implementiert jede Methode aus 3.3 mit realistischen Daten, damit sich alle Scre
 
 ## 13. Abnahmekriterien
 
-* [ ] `python -m ilias_sync.gui.app --fake` startet auf Windows und macOS, Tray Icon erscheint
-* [ ] Setup Wizard lässt sich mit dem Fake Backend komplett durchlaufen, inklusive Fehlerfällen
-* [ ] Alle fünf Tabs funktionieren mit dem Fake Backend
-* [ ] Während eines simulierten Syncs bleibt die GUI bedienbar, Abbrechen funktioniert
-* [ ] Fenster schließen beendet die App nicht, "Beenden" im Tray schon, sauber auch während eines Syncs
-* [ ] Zweiter Start öffnet das vorhandene Fenster
-* [ ] Keine Imports aus Backend Modulen außer `api` (bzw. `fake_backend`)
-* [ ] Kein Passwort in Logs, Attributen oder Fehlermeldungen
-* [ ] Tests grün
+* [ ] `python -m ilias_sync.gui.app --fake` startet auf Windows und macOS, Tray Icon erscheint (macOS geprüft 2026-09-26, Windows offen)
+* [x] Setup Wizard lässt sich mit dem Fake Backend komplett durchlaufen, inklusive Fehlerfällen
+* [x] Alle fünf Tabs funktionieren mit dem Fake Backend
+* [x] Während eines simulierten Syncs bleibt die GUI bedienbar, Abbrechen funktioniert
+* [x] Fenster schließen beendet die App nicht, "Beenden" im Tray schon, sauber auch während eines Syncs
+* [x] Zweiter Start öffnet das vorhandene Fenster
+* [x] Keine Imports aus Backend Modulen außer `api` (bzw. `fake_backend`)
+* [x] Kein Passwort in Logs, Attributen oder Fehlermeldungen
+* [x] Tests grün
 
 ## 14. Offene Punkte (mit dem Nutzer klären, nicht raten)
 

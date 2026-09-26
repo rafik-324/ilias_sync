@@ -390,3 +390,101 @@ def test_semester_spalte_nur_bei_mehreren_semestern(qtbot, fake):
     # Fake Config: nur HWS 2025
     assert w.courses.table.isColumnHidden(COL_SEM)
     assert "Semester HWS 2025" in w.courses.table.item(0, 0).toolTip()
+
+
+# ---------------- Abnahme: Wizard, Beenden, zweiter Start ----------------
+
+def test_wizard_kompletter_durchlauf_mit_fehlerfaellen(qtbot, fake_first_run, monkeypatch):
+    api = fake_first_run
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    wiz = SetupWizard(api)
+    qtbot.addWidget(wiz)
+    wiz.show()
+
+    # 1. Login: erst falsches Passwort, dann richtig
+    page = wiz.currentPage()
+    page.form.user.setText("musterstudi")
+    page.form.password.setText("falsch")
+    page.form.submit()
+    qtbot.waitUntil(lambda: "falsch" in page.form.status.text(), timeout=5000)
+    page.form.password.setText("geheim")
+    page.form.submit()
+    qtbot.waitUntil(page.isComplete, timeout=5000)
+    wiz.next()
+
+    # 2. Basisordner: noch nicht vorhanden, wird nach Rückfrage angelegt
+    page = wiz.currentPage()
+    base = api.workdir / "Uni"
+    page.path.setText(str(base))
+    page._run_check()
+    assert page.isComplete()
+    wiz.next()
+    assert (base / "01_Universität_Mannheim").is_dir()
+
+    # 3. Kurse: zuerst offline, dann Erneut versuchen
+    page = wiz.currentPage()
+    api.fail.add("offline")
+    page._load()
+    qtbot.waitUntil(lambda: not page.retry.isHidden(), timeout=5000)
+    assert "nicht erreichbar" in page.error.text()
+    api.fail.discard("offline")
+    page.retry.click()
+    qtbot.waitUntil(page.isComplete, timeout=10_000)
+    assert page.table.rowCount() == 7
+    wiz.next()
+
+    # 4. Vorschau
+    page = wiz.currentPage()
+    qtbot.waitUntil(page.isComplete, timeout=10_000)
+    assert page.tree.actions
+    wiz.next()
+
+    # 5. Fertig: Config enthält Basisordner, Uni-ID und Kurszuordnungen
+    wiz.accept()
+    cfg = api.load_config()
+    assert cfg.base_dir == base
+    assert cfg.username == "musterstudi"
+    assert {c.ref_id for c in cfg.courses} >= {1001, 1002, 1007}
+
+
+def test_beenden_waehrend_sync_bricht_sauber_ab(qtbot, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QApplication
+    from ilias_sync.gui.app import GuiApp
+    api = FakeApi(delay=0.05, workdir=tmp_path / "w")
+    g = GuiApp(api)
+    quit_called = []
+    monkeypatch.setattr(QApplication, "quit", lambda: quit_called.append(True))
+    asked = []
+
+    def frage(*a, **k):
+        asked.append(a[2] if len(a) > 2 else "")
+        return QMessageBox.StandardButton.No if len(asked) == 1 else QMessageBox.StandardButton.Yes
+    monkeypatch.setattr(QMessageBox, "question", frage)
+
+    assert g.controller.start_sync()
+    g.quit()                       # erste Rückfrage: Nein, App läuft weiter
+    assert not quit_called and g.controller.busy
+    import time
+    t0 = time.monotonic()
+    g.quit()                       # zweite Rückfrage: Ja
+    assert time.monotonic() - t0 < 2, "Beenden hing am Warten auf den Worker Thread"
+    assert quit_called
+    assert not g.controller._task or not g.controller._task.is_running()
+    assert "abgebrochen" in asked[0]
+    g.tray.hide()
+
+
+def test_zweiter_start_weckt_erste_instanz(qtbot, monkeypatch):
+    import uuid
+    from ilias_sync.gui import app as gui_app
+    # eigener Name, damit eine echte laufende App nicht geweckt wird
+    monkeypatch.setattr(gui_app, "_server_name", lambda: f"ilias-sync-test-{uuid.uuid4().hex}")
+    woken = []
+    first = gui_app.SingleInstance(lambda: woken.append(True))
+    assert not first.already_running()
+    first.listen()
+    second = gui_app.SingleInstance(lambda: None)
+    second.name = first.name
+    assert second.already_running()
+    qtbot.waitUntil(lambda: bool(woken), timeout=3000)
+    first.server.close()
