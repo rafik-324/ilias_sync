@@ -231,10 +231,10 @@ class Tray(QObject):
         if text := logic.unassigned_course_text([c.name for c in result.new_unassigned_courses]):
             lines.append(text)
             target = ZIEL_KURSE
-        if result.errors:
-            n = len(result.errors)
-            lines.append(f"{n} {'Fehler' if n == 1 else 'Fehler'} beim Sync, Details im Log.")
-            target = ZIEL_LOG
+        if text := logic.error_summary(result.errors):
+            # nur die Kurzfassung, die einzelnen Fehler stehen in der Übersicht unter Details
+            lines.append(f"{text}. Details im Fenster.")
+            target = ZIEL_UEBERSICHT
         if lines:
             self.notify("\n".join(lines), target, error=bool(result.errors))
 

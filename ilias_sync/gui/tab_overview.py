@@ -27,7 +27,7 @@ from ilias_sync.gui import logic, theme
 from ilias_sync.gui.controller import Controller, error_text
 from ilias_sync.gui.icons import SYNC_FRAMES, IconState, status_badge
 from ilias_sync.gui.tray import open_path
-from ilias_sync.gui.widgets import Card, Page, ProgressPanel, button, error_label, hint_label, role_label, show_error
+from ilias_sync.gui.widgets import Card, ErrorListDialog, Page, ProgressPanel, button, error_label, hint_label, role_label, show_error
 from ilias_sync.gui.worker import run_task
 
 log = logging.getLogger(__name__)
@@ -149,10 +149,13 @@ class OverviewTab(Page):
 
         # Fehler
         self.error = error_label()
+        self.btn_error_details = button("Details anzeigen")
+        self.btn_error_details.clicked.connect(self._show_error_details)
         self.btn_hide_error = button("Ausblenden", "ghost")
         self.btn_hide_error.clicked.connect(self.c.clear_error)
         err_row = QHBoxLayout()
         err_row.addWidget(self.error, 1)
+        err_row.addWidget(self.btn_error_details, 0, Qt.AlignmentFlag.AlignTop)
         err_row.addWidget(self.btn_hide_error, 0, Qt.AlignmentFlag.AlignTop)
         self.body.addLayout(err_row)
 
@@ -319,6 +322,7 @@ class OverviewTab(Page):
 
         show_error(self.error, c.config_error or c.last_error)
         self.btn_hide_error.setVisible(bool(c.last_error) and not c.config_error)
+        self.btn_error_details.setVisible(bool(c.last_errors) and not c.config_error)
         self.btn_sync.setEnabled(c.can_sync())
         self.btn_sync.setText("Anmelden ..." if c.login_needed else "Jetzt synchronisieren")
 
@@ -441,6 +445,9 @@ class OverviewTab(Page):
             self.c.login_required.emit()
         else:
             self.c.start_sync()
+
+    def _show_error_details(self) -> None:
+        ErrorListDialog(self.c.last_errors, self).exec()
 
     def _open_root(self) -> None:
         root = self.c.api.root_dir()

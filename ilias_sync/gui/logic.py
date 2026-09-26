@@ -156,6 +156,34 @@ def bundle_changed_files(files: list[ChangedFile]) -> str | None:
     return f"{_plural(total, 'Datei', 'Dateien')} in {where} {verb} in ILIAS geändert"
 
 
+# Fehlerarten für die Zusammenfassung nach dem Sync, erste passende gewinnt
+_ERROR_KINDS: list[tuple[str, re.Pattern[str]]] = [
+    ("Pfad zu lang", re.compile(r"pfad zu lang", re.IGNORECASE)),
+    ("Verbindungsfehler", re.compile(
+        r"connection|verbindung|nicht erreichbar|timeout|zeitüberschreitung|antwortet nicht", re.IGNORECASE)),
+    ("Zugriff verweigert", re.compile(r"permission|zugriff|berechtigung", re.IGNORECASE)),
+]
+OTHER_ERROR = "sonstige"
+
+
+def error_kind(text: str) -> str:
+    for label, pattern in _ERROR_KINDS:
+        if pattern.search(text):
+            return label
+    return OTHER_ERROR
+
+
+def error_summary(errors: list[str]) -> str | None:
+    """Kurzfassung der Sync Fehler, z. B. "12 Dateien nicht geladen: 11 Pfad zu lang,
+    1 Verbindungsfehler". None ohne Fehler. Die Einzelheiten zeigt der Dialog Details."""
+    if not errors:
+        return None
+    counts = Counter(error_kind(e) for e in errors)
+    order = [label for label, _ in _ERROR_KINDS] + [OTHER_ERROR]
+    parts = [f"{counts[k]} {k}" for k in order if counts[k]]
+    return f"{_plural(len(errors), 'Datei', 'Dateien')} nicht geladen: {', '.join(parts)}"
+
+
 def changed_count_text(n: int) -> str:
     """Eintrag im Tray Menü, z. B. "3 Dateien in ILIAS geändert"."""
     return f"{_plural(n, 'Datei', 'Dateien')} in ILIAS geändert"
@@ -375,6 +403,49 @@ def relative_to_root(path: Path, root: Path | None) -> str:
         except ValueError:
             pass
     return str(path.parent)
+
+
+# ---------------- Basisordner Hinweise ----------------
+
+LONG_BASE_DIR = 80
+
+# Pfadteile, an denen Cloud Ordner erkannt werden (klein geschrieben), mit Anzeigename
+_CLOUD_MARKERS: list[tuple[str, str]] = [
+    ("onedrive", "OneDrive"),
+    ("googledrive", "Google Drive"),
+    ("google drive", "Google Drive"),
+    ("dropbox", "Dropbox"),
+    ("mobile documents", "iCloud Drive"),
+    ("iclouddrive", "iCloud Drive"),
+    ("icloud drive", "iCloud Drive"),
+    ("cloudstorage", "einem Cloud Ordner"),
+]
+
+
+def cloud_provider(path: str | Path) -> str | None:
+    """Name des Cloud Dienstes, wenn der Pfad in einem synchronisierten Cloud Ordner liegt."""
+    parts = [p.lower() for p in re.split(r"[\\/]+", str(path)) if p]
+    for marker, name in _CLOUD_MARKERS:
+        if any(part.startswith(marker) for part in parts):
+            return name
+    return None
+
+
+def base_dir_hints(path: str | Path) -> list[str]:
+    """Hinweise zum gewählten Basisordner (blockieren nicht): Cloud Ordner und langer Pfad."""
+    hints = []
+    if provider := cloud_provider(path):
+        hints.append(
+            f"Der Ordner liegt in {provider}. Die Materialien (mehrere GB, mit Videos) werden dann in die "
+            "Cloud hochgeladen, und die Pfade werden länger. Ein Ordner außerhalb der Cloud ist meist besser."
+        )
+    length = len(str(path))
+    if length > LONG_BASE_DIR:
+        hints.append(
+            f"Der Pfad ist schon {length} Zeichen lang. Tiefe ILIAS Ordner können dadurch die Grenze "
+            "von 250 Zeichen überschreiten und nicht abgelegt werden. Ein kürzerer Basisordner ist besser."
+        )
+    return hints
 
 
 def contents_summary(flags: list[tuple[str, bool]]) -> str:

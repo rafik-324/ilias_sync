@@ -7,6 +7,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QProgressBar,
+    QPlainTextEdit,
     QPushButton,
     QSpinBox,
     QTreeWidget,
@@ -72,6 +74,33 @@ class SpinBox(QSpinBox):
 
     def wheelEvent(self, event) -> None:  # noqa: N802
         event.ignore()
+
+
+class ErrorListDialog(QDialog):
+    """Einzelne Fehler des letzten Syncs, eine Zeile pro Fehler, kopierbar."""
+
+    def __init__(self, errors: list[str], parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Fehler beim letzten Sync")
+        self.setWindowIcon(app_icon())
+        self.resize(720, 420)
+        lay = QVBoxLayout(self)
+        summary = role_label(logic.error_summary(errors) or "Keine Fehler.", "section")
+        summary.setWordWrap(True)
+        lay.addWidget(summary)
+        self.text = QPlainTextEdit("\n".join(errors))
+        self.text.setReadOnly(True)
+        self.text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self.text.setObjectName("logView")
+        lay.addWidget(self.text, 1)
+        lay.addWidget(hint_label("Pfad zu lang: ein kürzerer Basisordner hilft (Einstellungen). "
+                                 "Verbindungsfehler: beim nächsten Sync wird es erneut versucht."))
+        buttons = QDialogButtonBox()
+        copy = buttons.addButton("Kopieren", QDialogButtonBox.ButtonRole.ActionRole)
+        copy.clicked.connect(lambda: QApplication.clipboard().setText(self.text.toPlainText()))
+        buttons.addButton("Schließen", QDialogButtonBox.ButtonRole.RejectRole)
+        buttons.rejected.connect(self.reject)
+        lay.addWidget(buttons)
 
 
 def error_label() -> QLabel:

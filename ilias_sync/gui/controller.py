@@ -26,6 +26,7 @@ from ilias_sync.api import (
     SyncResult,
     SyncRun,
 )
+from ilias_sync.gui import logic
 from ilias_sync.gui.icons import IconState
 from ilias_sync.gui.worker import Task, run_task
 
@@ -58,7 +59,8 @@ class Controller(QObject):
         self.api = api
         self.config: Config | None = None
         self.config_error: str | None = None
-        self.last_error: str | None = None
+        self.last_error: str | None = None     # anzeigbare Kurzfassung
+        self.last_errors: list[str] = []       # einzelne Fehler des letzten Syncs für "Details"
         self.last_result: SyncResult | None = None
         self.last_progress: Progress | None = None
         self.login_needed = False
@@ -220,7 +222,8 @@ class Controller(QObject):
             self.refresh_last_run()
             assert isinstance(result, SyncResult)
             self.last_result = result
-            self.last_error = "; ".join(result.errors) if result.errors else None
+            self.last_errors = list(result.errors)
+            self.last_error = logic.error_summary(result.errors)
             self.login_needed = False
             self.sync_finished.emit(result, automatic)
             self.files_changed.emit()
@@ -253,6 +256,7 @@ class Controller(QObject):
                 self.dry_run_failed.emit(text)
             else:
                 self.last_error = text
+                self.last_errors = [text]
                 self.error.emit(text, automatic)
         if kind == "sync":
             self.refresh_last_run()
@@ -276,10 +280,12 @@ class Controller(QObject):
         """Nach erfolgreichem Login aus dem Dialog."""
         self.login_needed = False
         self.last_error = None
+        self.last_errors = []
         self.reload_config()
 
     def clear_error(self) -> None:
         self.last_error = None
+        self.last_errors = []
         self.state_changed.emit()
 
     def redownloaded(self) -> None:

@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from ilias_sync.api import BaseDirCheck, CourseConfig, IliasCourse, MappingSuggestion, PlannedAction
-from ilias_sync.gui import theme
+from ilias_sync.gui import logic, theme
 from ilias_sync.gui.controller import error_text
 from ilias_sync.gui.icons import app_icon
 from ilias_sync.gui.widgets import (
@@ -110,6 +110,11 @@ class BaseDirPage(QWizardPage):
 
         self.status = QLabel()
         self.status.setWordWrap(True)
+        # Hinweise, die nicht blockieren: Cloud Ordner, langer Pfad
+        self.hints = QLabel()
+        self.hints.setWordWrap(True)
+        theme.set_role(self.hints, "banner")
+        self.hints.hide()
         self.structure = QLabel()
         self.structure.setTextFormat(Qt.TextFormat.PlainText)
         theme.set_role(self.structure, "code")
@@ -117,6 +122,7 @@ class BaseDirPage(QWizardPage):
         lay = QVBoxLayout(self)
         lay.addLayout(row)
         lay.addWidget(self.status)
+        lay.addWidget(self.hints)
         lay.addSpacing(6)
         lay.addWidget(role_label("So wird es aussehen", "section"))
         lay.addWidget(self.structure)
@@ -155,8 +161,12 @@ class BaseDirPage(QWizardPage):
             self.status.setText("Bitte einen Ordner wählen.")
             theme.set_role(self.status, "muted")
             self.structure.setText("")
+            self.hints.hide()
             self.completeChanged.emit()
             return
+        hints = logic.base_dir_hints(path)
+        self.hints.setText("\n\n".join(hints))
+        self.hints.setVisible(bool(hints))
         self._check = self.api.check_base_dir(path)
         c = self._check
         if c.exists and not c.writable:
@@ -373,19 +383,26 @@ class PreviewPage(QWizardPage):
         self._done = False
         self._generation = 0
         self._task = None
+        self.too_long = 0
         self.progress = ProgressPanel()
         self.progress.cancel_clicked.connect(self._cancel)
         self.error = error_label()
         self.tree = PreviewTree()
         lay = QVBoxLayout(self)
+        self.btn_shorter = button("Kürzeren Basisordner wählen")
+        self.btn_shorter.clicked.connect(self._back_to_base_dir)
+        self.btn_shorter.hide()
         lay.addWidget(self.progress)
         lay.addWidget(self.error)
         lay.addWidget(self.tree, 1)
+        lay.addWidget(self.btn_shorter, 0, Qt.AlignmentFlag.AlignLeft)
 
     def initializePage(self) -> None:  # noqa: N802
         self._generation += 1
         gen = self._generation
         self._done = False
+        self.too_long = 0
+        self.btn_shorter.hide()
         self.completeChanged.emit()
         self.tree.clear()
         show_error(self.error, None)
@@ -396,6 +413,8 @@ class PreviewPage(QWizardPage):
                 return
             self.progress.stop()
             self.tree.set_actions(actions, self.api.root_dir())
+            self.too_long = logic.summarize(actions).too_long
+            self.btn_shorter.setVisible(self.too_long > 0)
             self._done = True
             self.completeChanged.emit()
 
@@ -413,6 +432,29 @@ class PreviewPage(QWizardPage):
     def _cancel(self) -> None:
         if self._task is not None:
             self._task.cancel()
+
+    def validatePage(self) -> bool:  # noqa: N802
+        # vor dem ersten Sync deutlich warnen, wenn Dateien nicht abgelegt werden können
+        if not self.too_long:
+            return True
+        n = self.too_long
+        answer = QMessageBox.question(
+            self, "Pfade zu lang",
+            f"{n} {'Datei kann' if n == 1 else 'Dateien können'} nicht abgelegt werden, weil der Pfad zu lang "
+            "ist. Zurück und einen kürzeren Basisordner wählen?",
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self._back_to_base_dir()
+            return False
+        return True
+
+    def _back_to_base_dir(self) -> None:
+        wiz = self.wizard()
+        # nach dem aktuellen Aufruf zurückblättern, bis die Seite Basisordner erreicht ist
+        def go() -> None:
+            while not isinstance(wiz.currentPage(), BaseDirPage) and wiz.currentId() != wiz.startId():
+                wiz.back()
+        QTimer.singleShot(0, go)
 
     def cleanupPage(self) -> None:  # noqa: N802
         self._cancel()

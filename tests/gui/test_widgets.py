@@ -418,9 +418,15 @@ def test_kurs_ohne_semester_auf_seite_kurse(qtbot, fake):
 
 # ---------------- Abnahme: Wizard, Beenden, zweiter Start ----------------
 
+
+def _ja_ausser_pfade_zu_lang(parent, title, *a, **k):
+    """Rückfragen im Wizard bejahen (Ordner anlegen), die Warnung zu langen Pfaden übergehen."""
+    return QMessageBox.StandardButton.No if title == "Pfade zu lang" else QMessageBox.StandardButton.Yes
+
+
 def test_wizard_kompletter_durchlauf_mit_fehlerfaellen(qtbot, fake_first_run, monkeypatch):
     api = fake_first_run
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(QMessageBox, "question", _ja_ausser_pfade_zu_lang)
     wiz = SetupWizard(api)
     qtbot.addWidget(wiz)
     wiz.show()
@@ -602,7 +608,7 @@ def _wizard_bis_ende(qtbot, wiz, api, sizes):
 
 def test_wizard_groesse_bleibt_auf_allen_seiten_gleich(qtbot, fake_first_run, monkeypatch):
     from ilias_sync.gui.setup_wizard import START_SIZE
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(QMessageBox, "question", _ja_ausser_pfade_zu_lang)
     wiz = SetupWizard(fake_first_run)
     qtbot.addWidget(wiz)
     wiz.show()
@@ -615,7 +621,7 @@ def test_wizard_groesse_bleibt_auf_allen_seiten_gleich(qtbot, fake_first_run, mo
 def test_wizard_mindestgroesse_verhindert_wachsen_ohne_umbruch(qtbot, fake_first_run, monkeypatch):
     from PySide6.QtWidgets import QLabel
     from ilias_sync.gui import setup_wizard
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(QMessageBox, "question", _ja_ausser_pfade_zu_lang)
     # späterer Fehler simuliert: langes Label ohne Umbruch auf der letzten Seite, Umbruch Schutz aus.
     # Die explizite Mindestgröße muss das Fenster trotzdem bei der Startgröße halten
     orig_init = setup_wizard.FinishPage.__init__
@@ -632,3 +638,77 @@ def test_wizard_mindestgroesse_verhindert_wachsen_ohne_umbruch(qtbot, fake_first
     sizes = []
     _wizard_bis_ende(qtbot, wiz, fake_first_run, sizes)
     assert sizes[-2] == setup_wizard.START_SIZE, sizes
+
+
+
+# ---------------- Fehler Details, zu lange Pfade im Wizard, Cloud Hinweis ----------------
+
+def test_fehler_zusammenfassung_und_details(qtbot, tmp_path, monkeypatch):
+    from ilias_sync.gui.widgets import ErrorListDialog
+    c = Controller(FakeApi(delay=0.0, workdir=tmp_path / "w", fail={"sync_errors"}))
+    w = MainWindow(c)
+    qtbot.addWidget(w)
+    with qtbot.waitSignal(c.sync_finished, timeout=10_000):
+        c.start_sync()
+    # ein Verbindungsfehler (sync_errors) und eine Datei mit zu langem Pfad
+    assert c.last_error == "2 Dateien nicht geladen: 1 Pfad zu lang, 1 Verbindungsfehler"
+    assert ";" not in w.overview.error.text()
+    assert not w.overview.btn_error_details.isHidden()
+    shown = []
+    monkeypatch.setattr(ErrorListDialog, "exec", lambda self: shown.append(self.text.toPlainText()))
+    w.overview.btn_error_details.click()
+    assert shown and len(shown[0].splitlines()) == 2
+    c.clear_error()
+    assert c.last_errors == [] and w.overview.btn_error_details.isHidden()
+
+
+def test_wizard_warnt_vor_zu_langen_pfaden_und_geht_zurueck(qtbot, fake_first_run, monkeypatch):
+    from ilias_sync.gui.setup_wizard import BaseDirPage, PreviewPage
+    antworten = []
+
+    def frage(parent, title, *a, **k):
+        antworten.append(title)
+        return QMessageBox.StandardButton.Yes
+    monkeypatch.setattr(QMessageBox, "question", frage)
+    wiz = SetupWizard(fake_first_run)
+    qtbot.addWidget(wiz)
+    wiz.show()
+    page = wiz.currentPage()
+    page.form.user.setText("musterstudi")
+    page.form.password.setText("geheim")
+    page.form.submit()
+    qtbot.waitUntil(page.isComplete, timeout=5000)
+    wiz.next()
+    wiz.currentPage().path.setText(str(fake_first_run.workdir / "Uni"))
+    wiz.currentPage()._run_check()
+    wiz.next()
+    qtbot.waitUntil(wiz.currentPage().isComplete, timeout=10_000)
+    wiz.next()
+    page = wiz.currentPage()
+    assert isinstance(page, PreviewPage)
+    qtbot.waitUntil(page.isComplete, timeout=10_000)
+    assert page.too_long == 1 and not page.btn_shorter.isHidden()
+    wiz.next()                  # Rückfrage mit Ja: zurück zum Basisordner
+    assert "Pfade zu lang" in antworten
+    qtbot.waitUntil(lambda: isinstance(wiz.currentPage(), BaseDirPage), timeout=3000)
+
+
+@pytest.mark.parametrize("path, cloud", [
+    ("/Users/x/Library/CloudStorage/OneDrive-Persönlich/Uni", True),
+    ("/Users/x/Library/Mobile Documents/com~apple~CloudDocs/Uni", True),
+    ("/Users/x/Library/CloudStorage/GoogleDrive-a@b.de/Meine Ablage", True),
+    ("C:\\Users\\x\\OneDrive\\Uni", True),
+    ("C:\\Users\\x\\Dropbox\\Uni", True),
+    ("/Users/x/Documents/Uni", False),
+])
+def test_basisordner_cloud_hinweis(path, cloud):
+    from ilias_sync.gui import logic
+    hints = logic.base_dir_hints(path)
+    assert any("Cloud" in h for h in hints) == cloud
+
+
+def test_basisordner_langer_pfad_hinweis():
+    from ilias_sync.gui import logic
+    assert logic.base_dir_hints("/Users/x/Uni") == []
+    lang = "/Users/x/" + "a" * 90
+    assert any("lang" in h for h in logic.base_dir_hints(lang))
