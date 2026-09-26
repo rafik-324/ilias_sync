@@ -22,6 +22,9 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QSpinBox,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -48,6 +51,29 @@ def action_color(kind: ActionKind) -> str:
         ActionKind.UNASSIGNED: t.warning,
         ActionKind.SKIP_TOO_LONG: t.danger,
     }[kind]
+
+
+class ElideDelegate(QStyledItemDelegate):
+    """Kürzt Text in einer Tabellenspalte auf eigene Art: vorn (Ordner, Ende sichtbar) oder
+    rechts mit sichtbarer Dateiendung (Dateinamen)."""
+
+    PADDING = 14   # Reserve (Innenabstand aus dem Stylesheet), damit Qt nicht zusätzlich kürzt
+
+    def __init__(self, mode: Qt.TextElideMode, keep_suffix: bool = False, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.mode = mode
+        self.keep_suffix = keep_suffix
+
+    def initStyleOption(self, option: QStyleOptionViewItem, index) -> None:  # noqa: N802
+        super().initStyleOption(option, index)
+        option.textElideMode = self.mode
+        if self.keep_suffix:
+            # Textbereich wie der Stil ihn zeichnet (inklusive Innenabstand aus dem Stylesheet)
+            widget = option.widget
+            style = widget.style() if widget is not None else QApplication.style()
+            rect = style.subElementRect(QStyle.SubElement.SE_ItemViewItemText, option, widget)
+            width = rect.width() - self.PADDING
+            option.text = logic.elide_keep_suffix(option.text, width, option.fontMetrics.horizontalAdvance)
 
 
 class ComboBox(QComboBox):

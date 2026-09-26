@@ -121,6 +121,28 @@ def progress_text(p: Progress) -> str:
     return f"{text} {p.detail}" if p.detail else text
 
 
+def course_short_name(ilias_name: str, pattern: str | None = None) -> str:
+    """Kurzer Kursname für enge Spalten: ohne Semester und ohne Kürzel in eckigen Klammern,
+    z. B. "Programmierpraktikum I, Große Übung [Ü] (HWS 2026)" -> "Programmierpraktikum I, Große Übung"."""
+    name = re.sub(r"\s*\[[^\]]*\]", " ", course_display_name(ilias_name, pattern))
+    return " ".join(name.split()).strip(" ,") or course_display_name(ilias_name, pattern)
+
+
+def elide_keep_suffix(text: str, width: int, measure) -> str:
+    """Rechts kürzen, aber die Dateiendung behalten: "how_to_mac_manu….mov".
+    measure(text) liefert die Breite in Pixeln (in der GUI QFontMetrics.horizontalAdvance)."""
+    if measure(text) <= width:
+        return text
+    stem, dot, ext = text.rpartition(".")
+    suffix = f".{ext}" if dot and stem and 0 < len(ext) <= 6 else ""
+    stem = stem if suffix else text
+    ell = "…"
+    avail = width - measure(ell + suffix)
+    while stem and measure(stem) > avail:
+        stem = stem[:-1]
+    return f"{stem}{ell}{suffix}" if stem else f"{ell}{suffix}"
+
+
 # ---------------- Benachrichtigungen ----------------
 
 def _plural(n: int, singular: str, plural: str) -> str:

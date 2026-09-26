@@ -257,3 +257,20 @@ def test_namensregel_kommt_aus_api():
     from ilias_sync import api
     assert logic.linux_name is api.linux_name
     assert logic.linux_name("02_Übung") == "02_uebung"
+
+
+def test_kurzer_kursname():
+    assert logic.course_short_name("Programmierpraktikum I, Große Übung [Ü] (HWS 2026)") == \
+        "Programmierpraktikum I, Große Übung"
+    assert logic.course_short_name("Praktische Informatik I [V] [1. PG] (HWS 2026)") == "Praktische Informatik I"
+    assert logic.course_short_name("Marketing (HWS 2026)") == "Marketing"
+    assert logic.course_short_name("[V]") == "[V]"          # nie leer
+
+
+def test_kuerzen_mit_endung():
+    measure = len                                            # 1 Zeichen = 1 Pixel
+    assert logic.elide_keep_suffix("kurz.pdf", 20, measure) == "kurz.pdf"
+    out = logic.elide_keep_suffix("how_to_-_mac_manuell_video.mov", 16, measure)
+    assert out.endswith("….mov") and len(out) <= 16 and out.startswith("how_to")
+    assert logic.elide_keep_suffix("ohne_endung_aber_lang", 8, measure) == "ohne_en…"
+    assert logic.elide_keep_suffix("x.pdf", 3, measure) == "….pdf"

@@ -27,7 +27,7 @@ from ilias_sync.gui import logic, theme
 from ilias_sync.gui.controller import Controller, error_text
 from ilias_sync.gui.icons import SYNC_FRAMES, IconState, status_badge
 from ilias_sync.gui.tray import open_path
-from ilias_sync.gui.widgets import Card, ErrorListDialog, Page, ProgressPanel, button, error_label, hint_label, role_label, show_error
+from ilias_sync.gui.widgets import Card, ElideDelegate, ErrorListDialog, Page, ProgressPanel, button, error_label, hint_label, role_label, show_error
 from ilias_sync.gui.worker import run_task
 
 log = logging.getLogger(__name__)
@@ -42,7 +42,8 @@ STATUS_TEXT = {
 }
 
 CHANGED_ROW = 44
-COURSE_COL = 210
+COURSE_COL = 180
+FOLDER_COL = 230
 CHANGED_VISIBLE_ROWS = 2   # weitere per Scrollen, damit die Dateiliste Platz behält
 
 HERO_TEXT = {
@@ -210,17 +211,22 @@ class OverviewTab(Page):
         recent.lay.addLayout(head)
         self.table = list_table(["Datei", "Kurs", "Ordner", "Zeit", ""])
         h = self.table.horizontalHeader()
+        # Datei am breitesten, Kurs und Ordner fest (vom Nutzer verschiebbar)
         h.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        # echte Kursnamen sind lang ("Praktische Informatik I [Ü] [1. PG]"), daher feste Breite
         h.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
         self.table.setColumnWidth(1, COURSE_COL)
-        h.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        h.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+        self.table.setColumnWidth(2, FOLDER_COL)
+        # Datei: Endung bleibt sichtbar. Ordner: vorn kürzen, das Ende ist aussagekräftig
+        self.table.setItemDelegateForColumn(0, ElideDelegate(Qt.TextElideMode.ElideRight, True, self.table))
+        self.table.setItemDelegateForColumn(1, ElideDelegate(Qt.TextElideMode.ElideRight, False, self.table))
+        self.table.setItemDelegateForColumn(2, ElideDelegate(Qt.TextElideMode.ElideLeft, False, self.table))
         h.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         h.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self.table.cellDoubleClicked.connect(lambda row, _c: self._open_file(row))
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._context_menu)
-        self.table.setToolTip("Doppelklick öffnet die Datei")
+        self.table.setToolTip("Doppelklick öffnet die Datei, Rechtsklick zeigt sie im Ordner")
         recent.lay.addWidget(self.table, 1)
         self.empty_hint = hint_label("Noch keine Dateien heruntergeladen. Starte den ersten Sync oben.")
         self.empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -342,15 +348,20 @@ class OverviewTab(Page):
         for row, f in enumerate(self._files):
             cells = [
                 f.name,
-                logic.course_display_name(f.course_name),
+                logic.course_short_name(f.course_name),
                 logic.relative_to_root(f.local_path, root),
                 logic.relative_time(f.downloaded_at),
                 STATUS_TEXT.get(f.status, f.status.value),
             ]
             for col, text in enumerate(cells):
                 item = QTableWidgetItem(text)
-                if col in (0, 2):
-                    item.setToolTip(str(f.local_path))
+                # voller Text als Tooltip, weil die Spalten gekürzt anzeigen
+                if col == 0:
+                    item.setToolTip(f"{f.name}\n{f.local_path}")
+                elif col == 1:
+                    item.setToolTip(f.course_name)
+                elif col == 2:
+                    item.setToolTip(str(f.local_path.parent))
                 if col in (2, 3):
                     item.setForeground(muted)
                 if col == 4 and text:
