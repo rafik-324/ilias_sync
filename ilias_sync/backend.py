@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import datetime
@@ -321,6 +322,24 @@ class Api:
             return sync.planned_actions(jobs, mapping, root)
 
     def sync(self, progress: ProgressCallback, cancel: threading.Event) -> SyncResult:
+        started = time.monotonic()
+        log.info("Sync gestartet")
+        try:
+            result = self._sync(progress, cancel)
+        except Cancelled:
+            log.info("Sync abgebrochen nach %.0f s", time.monotonic() - started)
+            raise
+        except IliasSyncError as e:
+            log.warning("Sync fehlgeschlagen nach %.0f s: %s", time.monotonic() - started, e)
+            raise
+        log.info("Sync %s: %d neu, %d in ILIAS geändert, %d Fehler, Dauer %.0f s",
+                 "abgebrochen" if result.run.cancelled else "fertig", len(result.new_files),
+                 len(result.changed_files), len(result.errors), time.monotonic() - started)
+        for error in result.errors:
+            log.warning("Sync Fehler: %s", error)
+        return result
+
+    def _sync(self, progress: ProgressCallback, cancel: threading.Event) -> SyncResult:
         cfg = self._cfg()
         root = self._require_root(cfg)
         with translate_errors(), self._state(root) as st:

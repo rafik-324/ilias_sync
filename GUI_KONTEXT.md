@@ -84,7 +84,7 @@ class ActionKind(Enum):
     SKIP_REMOVED = "skip_removed"  # vom Nutzer entfernt, wird nicht geladen
     SKIP_IGNORED = "skip_ignored"  # liegt in [ignore]
     CREATE_DIR = "create_dir"
-    UNASSIGNED = "unassigned"    # Kurs ohne Zuordnung, Ziel _Neue_Kurse
+    UNASSIGNED = "unassigned"    # Kurs ohne Zuordnung, Ziel _neue_kurse (bzw. ein vorhandenes _Neue_Kurse)
 
 @dataclass
 class CourseRule:
@@ -271,6 +271,17 @@ class Api:
     def set_autostart(self, enabled: bool) -> None: ...
 ```
 
+### 3.4 Hilfsfunktionen (Modulebene in `api.py`)
+
+```python
+from ilias_sync.api import linux_name
+
+linux_name("Ü1_MfN_Übungsskript Kernlösung.PDF")   # -> "ue1_mfn_uebungsskript_kernloesung.pdf"
+```
+
+* `linux_name(name: str) -> str`: Name nach Linux Standard, genau wie das Backend neue Dateien und Ordner benennt (nur `a-z`, `0-9`, `_`, `-`, `.`, Umlaute als ae/oe/ue/ss). Rein, ohne Seiteneffekte, im Hauptthread erlaubt. Die GUI nutzt sie für Vorschläge wie `NN_kursname`, statt eine eigene Kopie zu pflegen
+* Umgebungsvariable `ILIAS_SYNC_HOME` (bzw. CLI `--config-dir ORDNER`): lenkt Config (`<ORDNER>/config`), Daten mit Index und Cookies (`<ORDNER>/data`) und Log (`<ORDNER>/logs`) in einen eigenen Ordner, für Wizard und Benachrichtigungs Tests ohne die echte Einrichtung. Der Schlüsselbund Eintrag bleibt derselbe
+
 ## 4. Threading Modell (`worker.py`)
 
 * Ein generischer Worker: bekommt eine Funktion plus Argumente, führt sie in einem `QThread` aus, sendet Signale `progress(Progress)`, `finished(object)`, `failed(Exception)`
@@ -329,8 +340,8 @@ Klein und übersichtlich, Startgröße etwa 800 × 560, Größe und Position wer
 
 ### 6.2 Kurse
 * Tabelle: ILIAS Kurs, Semester, lokaler Ordner (Dropdown mit `local_course_dirs` plus Eintrag "Neuer Ordner ..." und "Nicht zugeordnet"), Checkboxen für Dateien, Videos, Übungen, Weblinks, Foren, Sonstiges
-* Nicht zugeordnete Kurse oben und farblich markiert, Hinweis: "Wird bis zur Zuordnung unter _Neue_Kurse abgelegt"
-* "Neuer Ordner ..." fragt den Namen ab und schlägt `NN_kursname` vor (nächste freie Nummer, klein, Leerzeichen zu `_`). Umbenennen eines vom Tool angelegten Ordners ändert **nur die Config Zuordnung**, die GUI verschiebt keine Dateien. Hinweis dazu anzeigen
+* Nicht zugeordnete Kurse oben und farblich markiert, Hinweis: "Wird bis zur Zuordnung unter _neue_kurse abgelegt"
+* "Neuer Ordner ..." fragt den Namen ab und schlägt `NN_kursname` vor (nächste freie Nummer, Name über `linux_name`, z. B. `03_statistik_i`). Umbenennen eines vom Tool angelegten Ordners ändert **nur die Config Zuordnung**, die GUI verschiebt keine Dateien. Hinweis dazu anzeigen
 * Button **Regeln bearbeiten** pro Kurs: Dialog mit Liste der `CourseRule`s (Typ Ordner oder Datei, Glob Muster, Zielordner), Reihenfolge per Hoch/Runter änderbar ("erste passende gewinnt"), Hinzufügen, Entfernen
 * Button **Kurse aktualisieren** (`fetch_courses` im Worker)
 * Änderungen werden mit **Speichern** übernommen (`save_config`), ungespeicherte Änderungen beim Tab Wechsel oder Schließen nachfragen
@@ -350,7 +361,7 @@ Klein und übersichtlich, Startgröße etwa 800 × 560, Größe und Position wer
 * **Intervall** in Minuten (`QSpinBox`, 15 bis 1440)
 * **Parallelität** (`QSpinBox`, 1 bis 5, Standard 3)
 * **Semester Muster** (Regex, mit Prüfung auf Gültigkeit vor dem Speichern)
-* **Semester Ordner** (`semesters`): kleine Tabelle "HWS 2026" → `01_SEMESTER`. Semester aus Kursnamen ohne Ordner erscheinen als leere Zeile (wird beim Sync mit der nächsten Nummer angelegt)
+* **Semester Ordner** (`semesters`): kleine Tabelle "HWS 2026" → `01_SEMESTER`. Semester aus Kursnamen ohne Ordner erscheinen als leere Zeile (wird beim Sync mit der nächsten Nummer angelegt, z. B. `02_semester`; vorhandene Ordner wie `01_SEMESTER` behalten ihre Schreibweise)
 * **Ignorierte lokale Ordner** (Liste mit Hinzufügen / Entfernen, Glob Muster)
 * **Autostart** Checkbox (`set_autostart`)
 * **Konto**: angezeigte Uni-ID, Button **Abmelden** mit Bestätigung ("Passwort und Session werden von diesem Gerät entfernt. Heruntergeladene Dateien bleiben erhalten.")

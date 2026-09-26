@@ -39,15 +39,31 @@ log = logging.getLogger(__name__)
 
 # ---------------- Pfade ----------------
 
+# Getrennte Umgebung für Tests: lenkt Config, Daten (Index, Cookies) und Log in einen
+# eigenen Ordner um (<Ordner>/config, /data, /logs). Der Schlüsselbund Eintrag bleibt derselbe.
+HOME_ENV = "ILIAS_SYNC_HOME"
+
+
+def home_override() -> Path | None:
+    value = os.environ.get(HOME_ENV, "").strip()
+    return Path(value).expanduser() if value else None
+
+
 def config_dir() -> Path:
+    if home := home_override():
+        return home / "config"
     return Path(platformdirs.user_config_dir(APP_NAME, appauthor=False))
 
 
 def data_dir() -> Path:
+    if home := home_override():
+        return home / "data"
     return Path(platformdirs.user_data_dir(APP_NAME, appauthor=False))
 
 
 def log_dir() -> Path:
+    if home := home_override():
+        return home / "logs"
     return Path(platformdirs.user_log_dir(APP_NAME, appauthor=False))
 
 

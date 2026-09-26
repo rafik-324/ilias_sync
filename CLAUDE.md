@@ -57,6 +57,7 @@ Das Repo liegt in OneDrive und wird auf beiden Rechnern genutzt. Zuerst per `una
 
 ### Python Umgebung
 
+* Getrennte Testumgebung: Umgebungsvariable `ILIAS_SYNC_HOME` bzw. CLI `--config-dir ORDNER` lenkt Config, Daten (Index, Cookies) und Log nach `<ORDNER>/config`, `/data`, `/logs`. Schlüsselbund bleibt gleich
 * Eine gemeinsame venv pro Rechner für beide Agenten, alle Pakete aus `requirements-dev.txt`. Nicht im Projektordner, weil OneDrive sonst tausende Dateien synchronisiert
 * Windows: `C:\Users\rafik\.venvs\ilias-sync` (Python 3.13). `python` im PATH ist nur der Microsoft Store Alias, daher immer den vollen Pfad nutzen: `C:\Users\rafik\.venvs\ilias-sync\Scripts\python.exe -m pytest`
 * macOS: `~/.venvs/ilias-sync` (Homebrew Python 3.12). `/usr/bin/python3` ist 3.9 und zu alt, daher immer `~/.venvs/ilias-sync/bin/python -m pytest`

@@ -199,6 +199,13 @@ class Cancelled(IliasSyncError):
     """Durch das cancel Token abgebrochen."""
 
 
+# ---------------- Hilfsfunktionen ----------------
+
+# Reine Funktion ohne Seiteneffekte, damit die GUI neue Namen genau wie das Backend
+# vorhersagen kann (z. B. Vorschlag NN_kursname). platform_utils importiert nichts von hier.
+from .platform_utils import linux_name as linux_name  # noqa: E402
+
+
 # ---------------- Fassade ----------------
 
 def __getattr__(name: str):
