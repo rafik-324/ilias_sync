@@ -712,3 +712,20 @@ def test_basisordner_langer_pfad_hinweis():
     assert logic.base_dir_hints("/Users/x/Uni") == []
     lang = "/Users/x/" + "a" * 90
     assert any("lang" in h for h in logic.base_dir_hints(lang))
+
+
+def test_neuer_kursordner_nutzt_vorschlag_des_backends(qtbot, fake, monkeypatch):
+    from ilias_sync.api import MappingSuggestion
+    w = MainWindow(Controller(fake))
+    qtbot.addWidget(w)
+    course = w.courses.cfg.courses[0]
+
+    def vorschlag(courses):
+        return [MappingSuggestion(courses[0], "01_SEMESTER", "07_vom_backend", False, 0.0)]
+    monkeypatch.setattr(fake, "suggest_mapping", vorschlag)
+    assert w.courses._new_dir_suggestion(course, ["01_x"]) == "07_vom_backend"
+
+    def kaputt(courses):
+        raise RuntimeError("Dateisystem nicht lesbar")
+    monkeypatch.setattr(fake, "suggest_mapping", kaputt)
+    assert w.courses._new_dir_suggestion(course, ["01_x"]) == "02_mathematik_vorkurs"

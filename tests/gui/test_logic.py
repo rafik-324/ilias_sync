@@ -274,3 +274,12 @@ def test_kuerzen_mit_endung():
     assert out.endswith("….mov") and len(out) <= 16 and out.startswith("how_to")
     assert logic.elide_keep_suffix("ohne_endung_aber_lang", 8, measure) == "ohne_en…"
     assert logic.elide_keep_suffix("x.pdf", 3, measure) == "….pdf"
+
+
+def test_ordnervorschlag_rueckfall_gekuerzt():
+    from ilias_sync.api import short_dir_name
+    lang = "Objektorientierte Programmierung fortgeschrittene Konzepte und Entwurfsmuster (HWS 2026)"
+    out = logic.suggest_course_dir(lang, ["01_a"])
+    assert out.startswith("02_")
+    assert out[3:] == short_dir_name(logic.linux_name(logic.course_display_name(lang)))
+    assert len(out[3:]) <= 40

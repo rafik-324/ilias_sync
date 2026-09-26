@@ -15,7 +15,16 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from ilias_sync.api import ActionKind, ChangedFile, Config, DownloadedFile, PlannedAction, Progress, linux_name
+from ilias_sync.api import (
+    ActionKind,
+    ChangedFile,
+    Config,
+    DownloadedFile,
+    PlannedAction,
+    Progress,
+    linux_name,
+    short_dir_name,
+)
 
 # ---------------- Zeitangaben ----------------
 
@@ -379,8 +388,9 @@ def next_number(existing: list[str]) -> int:
 
 
 def suggest_course_dir(ilias_name: str, existing: list[str], pattern: str | None = None) -> str:
-    """Vorschlag "NN_kursname" nach der Namensregel, nächste freie Nummer."""
-    name = linux_name(course_display_name(ilias_name, pattern)).strip("._-")
+    """Rückfall Vorschlag "NN_kursname" nach Namensregel und Längengrenze des Backends, nächste
+    freie Nummer. Besser ist der Vorschlag aus api.suggest_mapping (kürzt Kürzel, Untertitel usw.)."""
+    name = short_dir_name(linux_name(course_display_name(ilias_name, pattern)).strip("._-"))
     return f"{next_number(existing):02d}_{name or 'kurs'}"
 
 

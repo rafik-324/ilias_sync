@@ -287,12 +287,24 @@ class CoursesTab(Page):
 
     # ---------------- Bearbeiten ----------------
 
+    def _new_dir_suggestion(self, course: CourseConfig, existing: list[str]) -> str:
+        """Name für einen neuen Kursordner: bevorzugt wie das Backend ihn anlegen würde
+        (suggest_mapping), sonst eigene Ableitung mit linux_name und short_dir_name."""
+        sem = logic.semester_of(course.ilias_name, self._pattern())
+        try:
+            [s] = self.c.api.suggest_mapping([IliasCourse(course.ref_id, course.ilias_name, sem, "")])
+            if s.local_dir and not s.exists and s.local_dir not in existing:
+                return s.local_dir
+        except Exception:  # noqa: BLE001, Vorschlag ist nur eine Hilfe
+            log.warning("Ordnervorschlag des Backends nicht verfügbar", exc_info=True)
+        return logic.suggest_course_dir(course.ilias_name, existing, self._pattern())
+
     def _dir_chosen(self, course: CourseConfig, combo: QComboBox, existing: list[str]) -> None:
         if self._filling:
             return
         data = combo.currentData()
         if data == NEUER_ORDNER:
-            suggestion = logic.suggest_course_dir(course.ilias_name, existing, self._pattern())
+            suggestion = self._new_dir_suggestion(course, existing)
             name, ok = QInputDialog.getText(
                 self, "Neuer Kursordner",
                 "Name des Ordners (wird beim nächsten Sync angelegt):", text=suggestion,
