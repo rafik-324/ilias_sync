@@ -162,16 +162,10 @@ class ProgressPanel(QWidget):
         self.show()
 
     def update_progress(self, p: Progress) -> None:
+        self.bar.setRange(0, p.total or 0)   # ohne Gesamtzahl unbestimmter Balken
         if p.total:
-            self.bar.setRange(0, p.total)
             self.bar.setValue(p.current)
-            text = f"{p.phase} {p.current} von {p.total}"
-        else:
-            self.bar.setRange(0, 0)
-            text = f"{p.phase} ..."
-        if p.detail:
-            text += f": {p.detail}"
-        self.label.setText(text)
+        self.label.setText(logic.progress_text(p))
 
     def stop(self) -> None:
         self.hide()

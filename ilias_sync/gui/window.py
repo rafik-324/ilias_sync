@@ -169,7 +169,7 @@ class MainWindow(QMainWindow):
         self.status_dot.setPixmap(dot(color, 8))
         text = {
             IconState.READY: "Offline" if self.c.offline else "Bereit",
-            IconState.SYNCING: "Synchronisiert",
+            IconState.SYNCING: "Vorschau läuft" if self.c.previewing else "Synchronisiert",
             IconState.ERROR: "Fehler",
             IconState.LOGIN: "Anmeldung nötig",
             IconState.PAUSED: "Pausiert",

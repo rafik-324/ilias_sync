@@ -310,3 +310,34 @@ def test_wizard_schlaegt_keinen_vorhandenen_ordner_vor(qtbot, fake_first_run):
     qtbot.addWidget(page)
     page.initializePage()
     assert page.path.text() == ""
+
+
+# ---------------- Vorschau ----------------
+
+def test_vorschau_zeigt_fortschritt_auch_ohne_knopf(qtbot, tmp_path):
+    c = Controller(FakeApi(delay=0.02, workdir=tmp_path / "w"))
+    w = MainWindow(c)
+    qtbot.addWidget(w)
+    with qtbot.waitSignal(c.dry_run_finished, timeout=10_000):
+        assert c.start_dry_run()
+        assert not w.preview.progress.isHidden()
+        assert w.status_label.text() == "Vorschau läuft"
+    assert w.preview.progress.isHidden()
+    assert w.preview.tree.actions
+
+
+def test_vorschau_login_noetig_wird_angezeigt(qtbot, tmp_path):
+    from ilias_sync.api import InvalidCredentialsError
+
+    class OhneLogin(FakeApi):
+        def dry_run(self, progress, cancel):
+            raise InvalidCredentialsError("Anmeldung bei ILIAS nötig.")
+
+    c = Controller(OhneLogin(delay=0.0, workdir=tmp_path / "w"))
+    w = MainWindow(c)
+    qtbot.addWidget(w)
+    with qtbot.waitSignal(c.login_required, timeout=10_000):
+        w.preview.btn_preview.click()
+    assert c.login_needed
+    assert w.preview.error.text() == "Anmeldung bei ILIAS nötig."
+    assert w.preview.progress.isHidden()

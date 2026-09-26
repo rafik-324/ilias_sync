@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from ilias_sync.api import ActionKind, ChangedFile, Config, DownloadedFile, ItemStatus, PlannedAction
+from ilias_sync.api import ActionKind, ChangedFile, Config, DownloadedFile, ItemStatus, PlannedAction, Progress
 from ilias_sync.gui import logic
 from ilias_sync.gui.scheduler_gui import START_DELAY, next_due
 
@@ -241,3 +241,12 @@ def test_geaendert_menue_und_vorschau():
     assert ActionKind.CHANGED in logic.LEGEND_KINDS
     assert ActionKind.UPDATE not in logic.LEGEND_KINDS
     assert set(logic.ACTION_LABELS) == set(ActionKind) == set(logic.ACTION_HINTS)
+
+
+def test_fortschritt_text():
+    assert logic.progress_text(Progress("Herunterladen", 3, 12, "a.pdf")) == "Herunterladen 3 von 12: a.pdf"
+    assert logic.progress_text(Progress("Herunterladen", 3, 12, None)) == "Herunterladen 3 von 12"
+    # echtes Backend: beim Durchsuchen keine Gesamtzahl, current = gelesene Seiten
+    assert logic.progress_text(Progress("Durchsuchen", 37, None, "ILIAS Seiten gelesen")) == \
+        "Durchsuchen ... 37 ILIAS Seiten gelesen"
+    assert logic.progress_text(Progress("Anmelden", 0, None, None)) == "Anmelden ..."

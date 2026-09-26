@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from ilias_sync.api import ActionKind, ChangedFile, Config, DownloadedFile, PlannedAction
+from ilias_sync.api import ActionKind, ChangedFile, Config, DownloadedFile, PlannedAction, Progress
 
 # ---------------- Zeitangaben ----------------
 
@@ -107,6 +107,18 @@ def course_display_name(ilias_name: str, pattern: str | None = None) -> str:
     except re.error:
         name = ilias_name
     return " ".join(name.split()).strip() or ilias_name
+
+
+def progress_text(p: Progress) -> str:
+    """Text zum Fortschritt, z. B. "Herunterladen 3 von 12: a.pdf" oder "Durchsuchen ... 37 ILIAS Seiten gelesen"."""
+    if p.total:
+        text = f"{p.phase} {p.current} von {p.total}"
+        return f"{text}: {p.detail}" if p.detail else text
+    # ohne Gesamtzahl zählt current nur mit (z. B. gelesene Seiten beim Durchsuchen)
+    text = f"{p.phase} ..."
+    if p.current:
+        text += f" {p.current}"
+    return f"{text} {p.detail}" if p.detail else text
 
 
 # ---------------- Benachrichtigungen ----------------
