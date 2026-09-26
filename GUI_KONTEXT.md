@@ -439,6 +439,8 @@ Implementiert jede Methode aus 3.3 mit realistischen Daten, damit sich alle Scre
 
 ## 14. Offene Punkte (mit dem Nutzer klären, nicht raten)
 
-* Finale Icons (Gestaltung, Farben)
+* keine
+
+Geklärt am 26.09.2026: Finale Icons nach Design Handoff Richtung 1b (das "i" als Download Pfeil), SVGs in `ilias_sync/gui/assets/`, Build Icons in `packaging/icons/`.
 
 Geklärt am 25.09.2026: Semester Zuordnung in den Einstellungen. Videos bleiben im Wizard standardmäßig an. Einstellungen bekommen einen Button "Jetzt synchronisieren". Erster Sync nur in einen leeren Uni Ordner.
