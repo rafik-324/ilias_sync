@@ -17,12 +17,18 @@ import ilias_sync
 APP_NAME = "ILIAS Sync"
 BUNDLE_ID = "de.rafik.ilias-sync"
 
+# Logo und Tray Icons der GUI (SVG), geladen über Path(__file__).parent / "assets"
+ASSETS = os.path.join(PROJECT, "ilias_sync", "gui", "assets")
+# App Icon, erzeugt mit packaging/make_icons.py. Fehlt es noch, baut PyInstaller mit Standard Icon
+ICNS = os.path.join(SPECPATH, "icons", "ilias_sync.icns")
+
 a = Analysis(
     [os.path.join(SPECPATH, "launcher.py")],
     pathex=[PROJECT],
     # keyring findet seine Backends über Entry Points, die brauchen die Paket Metadaten
-    datas=copy_metadata("keyring"),
-    hiddenimports=collect_submodules("keyring.backends"),
+    datas=copy_metadata("keyring") + ([(ASSETS, "ilias_sync/gui/assets")] if os.path.isdir(ASSETS) else []),
+    # QtSvg rendert die SVG Icons (QSvgRenderer), wird nur dynamisch gebraucht
+    hiddenimports=collect_submodules("keyring.backends") + ["PySide6.QtSvg"],
     # Nur was die App braucht, spart viele MB
     excludes=["tkinter", "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets", "PySide6.Qt3DCore",
               "PySide6.QtQuick", "PySide6.QtQml", "PySide6.QtMultimedia", "PySide6.QtCharts"],
@@ -46,7 +52,7 @@ coll = COLLECT(exe, a.binaries, a.datas, name=APP_NAME)
 app = BUNDLE(
     coll,
     name=f"{APP_NAME}.app",
-    icon=None,               # Platzhalter, eigenes .icns folgt
+    icon=ICNS if os.path.isfile(ICNS) else None,
     bundle_identifier=BUNDLE_ID,
     version=ilias_sync.__version__,
     info_plist={
