@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import hashlib
 import logging
 import sys
 from logging.handlers import RotatingFileHandler
@@ -20,6 +21,7 @@ from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
 
 from ilias_sync import __version__
+from ilias_sync.api import home_override
 from ilias_sync.gui import theme
 from ilias_sync.gui.controller import Controller
 from ilias_sync.gui.icons import app_icon
@@ -49,12 +51,22 @@ def setup_logging(api) -> None:
     root.setLevel(logging.INFO)
 
 
+def instance_suffix() -> str:
+    """Kurzer Hash der Testumgebung (ILIAS_SYNC_HOME), sonst leer. Trennt Einzelinstanz
+    Sperre und QSettings einer Test App von der normalen App."""
+    home = home_override()
+    if home is None:
+        return ""
+    return hashlib.sha256(str(home.resolve()).encode("utf-8")).hexdigest()[:8]
+
+
 def _server_name() -> str:
     try:
         user = getpass.getuser()
     except Exception:  # noqa: BLE001
         user = "user"
-    return f"ilias-sync-{user}"
+    suffix = instance_suffix()
+    return f"ilias-sync-{user}-{suffix}" if suffix else f"ilias-sync-{user}"
 
 
 class SingleInstance:
@@ -203,7 +215,9 @@ class GuiApp:
 def run(api, argv: list[str] | None = None, show_window: bool = False) -> int:
     """Startet die GUI und gibt den Exit Code zurück."""
     QCoreApplication.setOrganizationName("ILIAS Sync")
-    QCoreApplication.setApplicationName("ILIAS Sync")
+    # eigener QSettings Scope (Fenstergeometrie) für eine Testumgebung
+    suffix = instance_suffix()
+    QCoreApplication.setApplicationName(f"ILIAS Sync (Test {suffix})" if suffix else "ILIAS Sync")
     QCoreApplication.setApplicationVersion(__version__)
     app = QApplication.instance() or QApplication(argv or sys.argv)
     app.setQuitOnLastWindowClosed(False)

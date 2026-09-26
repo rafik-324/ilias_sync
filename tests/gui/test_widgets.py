@@ -505,3 +505,19 @@ def test_logo_assets_vorhanden_und_ladbar(qtbot):
     assert not icons.tray_icon(IconState.SYNCING, animate=False).isNull()
     # Animation kehrt nach einem Zyklus in die Ruhelage zurück
     assert icons.sync_pose(0) == (0.0, 1.0, 0.0)
+
+
+def test_einzelinstanz_und_settings_je_testumgebung(monkeypatch, tmp_path):
+    from ilias_sync.gui import app as gui_app
+    monkeypatch.delenv("ILIAS_SYNC_HOME", raising=False)
+    normal = gui_app._server_name()
+    assert gui_app.instance_suffix() == ""
+    assert normal.startswith("ilias-sync-") and normal.count("-") >= 2
+
+    monkeypatch.setenv("ILIAS_SYNC_HOME", str(tmp_path / "a"))
+    a = gui_app._server_name()
+    assert a != normal and a.startswith(normal + "-")
+    assert gui_app._server_name() == a            # stabil
+    monkeypatch.setenv("ILIAS_SYNC_HOME", str(tmp_path / "b"))
+    assert gui_app._server_name() not in (a, normal)
+    assert len(gui_app.instance_suffix()) == 8

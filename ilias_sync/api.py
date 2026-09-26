@@ -205,6 +205,10 @@ class Cancelled(IliasSyncError):
 # vorhersagen kann (z. B. Vorschlag NN_kursname). platform_utils importiert nichts von hier.
 from .platform_utils import linux_name as linux_name  # noqa: E402
 
+# Ordner der Testumgebung (ILIAS_SYNC_HOME bzw. --config-dir) oder None. Die GUI trennt damit
+# Einzelinstanz Sperre und QSettings der Testumgebung von der normalen App.
+from .config import home_override as home_override  # noqa: E402
+
 
 # ---------------- Fassade ----------------
 

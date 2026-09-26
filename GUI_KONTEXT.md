@@ -280,6 +280,7 @@ linux_name("Ü1_MfN_Übungsskript Kernlösung.PDF")   # -> "ue1_mfn_uebungsskrip
 ```
 
 * `linux_name(name: str) -> str`: Name nach Linux Standard, genau wie das Backend neue Dateien und Ordner benennt (nur `a-z`, `0-9`, `_`, `-`, `.`, Umlaute als ae/oe/ue/ss). Rein, ohne Seiteneffekte, im Hauptthread erlaubt. Die GUI nutzt sie für Vorschläge wie `NN_kursname`, statt eine eigene Kopie zu pflegen
+* `home_override() -> Path | None`: Ordner der Testumgebung aus `ILIAS_SYNC_HOME`, sonst `None`. Die GUI hängt daran einen kurzen Hash an den Namen der Einzelinstanz Sperre und an den QSettings Scope, damit eine Test App die normale App nicht blockiert
 * Umgebungsvariable `ILIAS_SYNC_HOME` (bzw. CLI `--config-dir ORDNER`): lenkt Config (`<ORDNER>/config`), Daten mit Index und Cookies (`<ORDNER>/data`) und Log (`<ORDNER>/logs`) in einen eigenen Ordner, für Wizard und Benachrichtigungs Tests ohne die echte Einrichtung. Der Schlüsselbund Eintrag bleibt derselbe
 
 ## 4. Threading Modell (`worker.py`)
