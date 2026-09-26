@@ -488,3 +488,20 @@ def test_zweiter_start_weckt_erste_instanz(qtbot, monkeypatch):
     assert second.already_running()
     qtbot.waitUntil(lambda: bool(woken), timeout=3000)
     first.server.close()
+
+
+# ---------------- Logo und Icons ----------------
+
+def test_logo_assets_vorhanden_und_ladbar(qtbot):
+    from ilias_sync.gui import icons
+    for name in icons.ASSET_FILES:
+        assert icons.asset_path(name).is_file(), name
+    assert not icons.app_icon().isNull() and not icons.app_icon(dark=True).isNull()
+    assert not icons.brand_pixmap(30, dark=False).isNull()
+    assert not icons.brand_pixmap(30, dark=True).isNull()
+    for state in IconState:
+        for frame in range(icons.SYNC_FRAMES):
+            assert not icons.tray_icon(state, frame, dark=False).isNull()
+    assert not icons.tray_icon(IconState.SYNCING, animate=False).isNull()
+    # Animation kehrt nach einem Zyklus in die Ruhelage zurück
+    assert icons.sync_pose(0) == (0.0, 1.0, 0.0)

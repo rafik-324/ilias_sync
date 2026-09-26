@@ -71,3 +71,16 @@ def activate_app() -> None:
         _send(_ns_app(), "activateIgnoringOtherApps:", True, restype=None, argtypes=(ctypes.c_bool,))
     except Exception:  # noqa: BLE001
         log.warning("App konnte nicht aktiviert werden", exc_info=True)
+
+
+def reduce_motion() -> bool:
+    """Systemeinstellung "Bewegung reduzieren" (macOS). Auf anderen Systemen False."""
+    if not IS_MAC:
+        return False
+    try:
+        cls = _runtime().objc_getClass(b"NSWorkspace")
+        ws = _send(cls, "sharedWorkspace")
+        return bool(_send(ws, "accessibilityDisplayShouldReduceMotion", restype=ctypes.c_bool))
+    except Exception:  # noqa: BLE001
+        log.warning("Einstellung Bewegung reduzieren nicht lesbar", exc_info=True)
+        return False

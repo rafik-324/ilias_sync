@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QByteArray, QSettings, QSize, Qt, Signal
-from PySide6.QtGui import QCloseEvent, QGuiApplication, QKeySequence, QShortcut
+from PySide6.QtGui import QCloseEvent, QFont, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 from ilias_sync import __version__
 from ilias_sync.gui import logic, theme
 from ilias_sync.gui.controller import Controller
-from ilias_sync.gui.icons import IconState, app_icon, dot, nav_icon
+from ilias_sync.gui.icons import IconState, app_icon, brand_pixmap, dot, nav_icon
 from ilias_sync.gui.macos import activate_app
 from ilias_sync.gui.tab_courses import CoursesTab
 from ilias_sync.gui.tab_log import LogTab
@@ -96,11 +96,15 @@ class MainWindow(QMainWindow):
         brand = QHBoxLayout()
         brand.setContentsMargins(20, 0, 16, 0)
         brand.setSpacing(10)
-        logo = QLabel()
-        logo.setPixmap(app_icon().pixmap(28, 28))
-        brand.addWidget(logo)
-        name = QLabel("ILIAS Sync")
+        # Logo: Glyph passend zum Farbmodus, Wortmarke in der App Schrift (keine Webfont)
+        self.logo = QLabel()
+        self.logo.setPixmap(brand_pixmap(30))
+        brand.addWidget(self.logo)
+        name = QLabel("ilias sync")
         name.setObjectName("brand")
+        font = name.font()
+        font.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 98)
+        name.setFont(font)
         brand.addWidget(name, 1)
         v.addLayout(brand)
         v.addSpacing(22)
@@ -151,6 +155,7 @@ class MainWindow(QMainWindow):
             self.nav.item(i).setIcon(nav_icon(name, t.muted, t.accent))
 
     def _refresh_theme(self) -> None:
+        self.logo.setPixmap(brand_pixmap(30))
         self._update_nav_icons()
         self._refresh_status()
 

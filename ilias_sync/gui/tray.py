@@ -13,7 +13,8 @@ from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 from ilias_sync.api import SyncResult
 from ilias_sync.gui import logic
 from ilias_sync.gui.controller import Controller
-from ilias_sync.gui.icons import SYNC_FRAMES, IconState, tray_icon
+from ilias_sync.gui.icons import SYNC_FRAME_MS, SYNC_FRAMES, IconState, tray_icon
+from ilias_sync.gui.macos import reduce_motion
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ class Tray(QObject):
         super().__init__(parent)
         self.controller = controller
         self._frame = 0
+        self._static_sync = False
         self._notify_target = ZIEL_UEBERSICHT
 
         self.icon = QSystemTrayIcon(tray_icon(IconState.READY), self)
@@ -51,7 +53,7 @@ class Tray(QObject):
         self.icon.messageClicked.connect(self._on_message_clicked)
 
         self._anim = QTimer(self)
-        self._anim.setInterval(300)
+        self._anim.setInterval(SYNC_FRAME_MS)
         self._anim.timeout.connect(self._next_frame)
 
         self._build_menu()
@@ -136,10 +138,16 @@ class Tray(QObject):
         c = self.controller
         state = c.icon_state()
         if state == IconState.SYNCING:
-            if not self._anim.isActive():
-                self._frame = 0
-                self._anim.start()
+            if not self._anim.isActive() and not self._static_sync:
+                # "Bewegung reduzieren" einmal pro Sync abfragen, dann Standbild statt Animation
+                if reduce_motion():
+                    self._static_sync = True
+                    self.icon.setIcon(tray_icon(IconState.SYNCING, animate=False))
+                else:
+                    self._frame = 0
+                    self._anim.start()
         else:
+            self._static_sync = False
             self._anim.stop()
             self.icon.setIcon(tray_icon(state))
 
