@@ -205,6 +205,7 @@ class Cancelled(IliasSyncError):
 # Reine Funktion ohne Seiteneffekte, damit die GUI neue Namen genau wie das Backend
 # vorhersagen kann (z. B. Vorschlag NN_kursname). platform_utils importiert nichts von hier.
 from .platform_utils import linux_name as linux_name  # noqa: E402
+from .platform_utils import short_dir_name as short_dir_name  # noqa: E402
 
 def home_override() -> Path | None:
     """Ordner der Testumgebung (ILIAS_SYNC_HOME bzw. --config-dir) oder None. Die GUI trennt damit
