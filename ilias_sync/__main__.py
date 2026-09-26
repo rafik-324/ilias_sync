@@ -17,7 +17,7 @@ from pathlib import Path
 import requests
 from bs4 import BeautifulSoup
 
-from . import auth, config, crawler, downloader, mapper
+from . import auth, config, crawler, downloader, mapper, state, sync
 from .api import Config, ConfigError
 
 log = logging.getLogger(config.APP_NAME)
@@ -231,11 +231,8 @@ def format_crawl(result: crawler.CrawlResult) -> list[str]:
 
 # ---------------- Test Sync: echte Downloads in einen Testordner ----------------
 
-VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".mkv", ".webm", ".avi", ".wmv"}
-
-
 def is_video(item: mapper.MappedItem) -> bool:
-    return Path(item.obj.name).suffix.lower() in VIDEO_SUFFIXES
+    return sync.is_video(item.obj.name)
 
 
 def check_test_target(target: Path, real_root: Path) -> str | None:
@@ -288,16 +285,24 @@ def format_preview(mapping: mapper.MappingResult, skipped_videos: set[int]) -> l
     return lines
 
 
+def real_root_or_report(cfg: Config) -> Path | None:
+    """Uni Ordner (base_dir / root_folder_name), None mit Meldung, wenn er fehlt."""
+    if cfg.base_dir is None:
+        print("FEHLER: In der Config fehlt general.base_dir (Basispfad).")
+        return None
+    real_root = cfg.base_dir / cfg.root_folder_name
+    if not real_root.is_dir():
+        print("FEHLER: Uni Ordner nicht gefunden:", real_root)
+        return None
+    return real_root
+
+
 def cmd_test_sync(target: Path, with_videos: bool) -> int:
     cfg = load_config_or_report()
     if cfg is None:
         return 1
-    if cfg.base_dir is None:
-        print("FEHLER: In der Config fehlt general.base_dir (Basispfad).")
-        return 1
-    real_root = cfg.base_dir / cfg.root_folder_name
-    if not real_root.is_dir():
-        print("FEHLER: Uni Ordner nicht gefunden:", real_root)
+    real_root = real_root_or_report(cfg)
+    if real_root is None:
         return 1
     if problem := check_test_target(target, real_root):
         print("FEHLER:", problem)
@@ -364,6 +369,143 @@ def cmd_test_sync(target: Path, with_videos: bool) -> int:
     return 0 if not errors else 2
 
 
+# ---------------- Dry Run und Sync ----------------
+
+PLAN_LABELS = {
+    sync.Kind.NEW: "Neu laden",
+    sync.Kind.ADOPT: "Schon vorhanden, nur in den Index übernehmen",
+    sync.Kind.CHANGED: "In ILIAS geändert (wird nur gemeldet, nicht geladen)",
+    sync.Kind.REMOVED: "Von dir verschoben oder gelöscht (wird nicht erneut geladen)",
+    sync.Kind.UNCHANGED: "Unverändert",
+    sync.Kind.DISABLED: "In den Kurs Einstellungen abgeschaltet",
+}
+
+
+def format_plan(actions: list[sync.FileAction], root: Path, details: bool = True) -> list[str]:
+    """Zusammenfassung und Liste der Aktionen eines Plans."""
+    by_kind: dict[sync.Kind, list[sync.FileAction]] = {k: [] for k in sync.Kind}
+    for a in actions:
+        by_kind[a.kind].append(a)
+    new_size = sum(a.item.obj.size or 0 for a in by_kind[sync.Kind.NEW])
+    lines = ["Zusammenfassung"]
+    for kind, label in PLAN_LABELS.items():
+        extra = f" ({format_size(new_size)})" if kind == sync.Kind.NEW and new_size else ""
+        lines.append(f"  {label}: {len(by_kind[kind])}{extra}")
+    modified = sum(a.user_modified for a in actions)
+    if modified:
+        lines.append(f"  Davon von dir bearbeitet (bleiben unangetastet): {modified}")
+    if not details:
+        return lines
+
+    def rel(path: Path) -> str:
+        try:
+            return path.relative_to(root).as_posix()
+        except ValueError:
+            return str(path)
+
+    for kind in (sync.Kind.NEW, sync.Kind.CHANGED, sync.Kind.ADOPT, sync.Kind.REMOVED):
+        if not by_kind[kind]:
+            continue
+        lines += ["", PLAN_LABELS[kind] + ":"]
+        for a in sorted(by_kind[kind], key=lambda a: rel(a.target)):
+            line = f"  {rel(a.target)}"
+            if kind == sync.Kind.NEW:
+                line += f"   {format_size(a.item.obj.size)}"
+                if a.item.new_dirs:
+                    line += "   (neuer Ordner)"
+            elif kind == sync.Kind.CHANGED and a.item.obj.mtime:
+                line += f"   neu in ILIAS: {a.item.obj.mtime:%d.%m.%Y %H:%M}"
+            lines.append(line)
+    return lines
+
+
+def prepare_sync(course_ids: list[int]) -> tuple | None:
+    """Config, Session, Crawl, Mapping und Plan. None bei Fehler (bereits gemeldet)."""
+    cfg = load_config_or_report()
+    if cfg is None:
+        return None
+    root = real_root_or_report(cfg)
+    if root is None:
+        return None
+    s = open_session(cfg)
+    if s is None:
+        return None
+    result = run_crawl(cfg, s, course_ids)
+    if result is None:
+        return None
+    mapping = mapper.Mapper(cfg, root).map_crawl(result)
+    st = state.State()
+    actions = sync.plan(mapping, st, root, cfg)
+    if result.failed:
+        print(f"Hinweis: {len(result.failed)} ILIAS Seiten konnten nicht gelesen werden, deren Inhalt fehlt im Plan.")
+    return cfg, s, root, st, actions
+
+
+def cmd_dry_run(course_ids: list[int], output: Path | None) -> int:
+    print("Dry Run: zeigt, was ein Sync tun würde. Es wird nichts heruntergeladen oder in deine Ordner geschrieben")
+    prepared = prepare_sync(course_ids)
+    if prepared is None:
+        return 1
+    _, _, root, st, actions = prepared
+    st.close()
+    lines = format_plan(actions, root)
+    print("\n".join(lines))
+    if output:
+        output.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        print("Ausgabe gespeichert in:", output)
+    return 0
+
+
+def cmd_sync(course_ids: list[int], assume_yes: bool) -> int:
+    prepared = prepare_sync(course_ids)
+    if prepared is None:
+        return 1
+    cfg, s, root, st, actions = prepared
+    with st:
+        print("\n".join(format_plan(actions, root, details=False)))
+        print("Ziel:", root)
+        if not assume_yes and input("Sync jetzt ausführen? [j/N] ").strip().lower() != "j":
+            print("Abgebrochen, nichts geändert.")
+            return 1
+
+        relogin_lock = threading.Lock()
+
+        def relogin() -> None:
+            with relogin_lock:
+                auth.relogin(s, lambda: console_credentials(cfg))
+
+        cancel = threading.Event()
+        started = time.monotonic()
+        try:
+            summary = sync.execute(
+                actions, s, st, root,
+                max_parallel=cfg.max_parallel,
+                throttle=crawler.Throttle(crawler.DEFAULT_DELAY),
+                relogin=relogin,
+                progress=lambda p: progress_line(f"Dateien: {p.current}/{p.total}"),
+                cancel=cancel,
+            )
+        except KeyboardInterrupt:
+            cancel.set()
+            print("\nAbgebrochen. Bereits geladene Dateien bleiben, .part Dateien werden entfernt.")
+            return 1
+        if sys.stderr.isatty():
+            print(file=sys.stderr)
+
+    lines = [
+        f"Sync fertig in {time.monotonic() - started:.0f} s: {len(summary.new)} neu geladen, "
+        f"{summary.adopted} vorhandene übernommen, {len(summary.errors)} Fehler",
+    ]
+    if summary.changed:
+        lines.append(f"{len(summary.changed)} Dateien wurden in ILIAS geändert (nicht geladen):")
+        lines += [f"  {i.local_path}" for i in summary.changed]
+    if summary.removed:
+        lines.append(f"{summary.removed} Dateien hast du verschoben oder gelöscht, sie werden nicht erneut geladen")
+    lines += [f"  FEHLER {e}" for e in summary.errors]
+    print("\n".join(lines))
+    return 0 if not summary.errors else 2
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ilias_sync", description="ILIAS Sync (Uni Mannheim)")
     group = parser.add_mutually_exclusive_group(required=True)
@@ -373,7 +515,11 @@ def main(argv: list[str] | None = None) -> int:
                        help="Testlauf: alle Kurse, Ordner und Dateien auflisten, nichts herunterladen")
     group.add_argument("--test-sync", type=Path, metavar="ZIELORDNER",
                        help="Test: Dateien einsortiert in ZIELORDNER laden, echte Uni Ordner nur lesen")
+    group.add_argument("--dry-run", action="store_true",
+                       help="zeigen, was ein Sync tun würde, ohne etwas zu laden oder zu schreiben")
+    group.add_argument("--sync", action="store_true", help="synchronisieren: neue Dateien in den Uni Ordner laden")
     parser.add_argument("--videos", action="store_true", help="beim Test Sync auch Videos laden")
+    parser.add_argument("-y", "--yes", action="store_true", help="beim Sync nicht nachfragen")
     parser.add_argument("--course", type=int, action="append", default=[], metavar="REF_ID",
                         help="nur diesen Kurs crawlen (mehrfach möglich)")
     parser.add_argument("--output", type=Path, metavar="DATEI", help="Ausgabe zusätzlich in Datei speichern")
@@ -389,6 +535,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_crawl(args.course, args.output)
     if args.test_sync:
         return cmd_test_sync(args.test_sync, args.videos)
+    if args.dry_run:
+        return cmd_dry_run(args.course, args.output)
+    if args.sync:
+        return cmd_sync(args.course, args.yes)
     return cmd_logout()
 
 
