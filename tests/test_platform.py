@@ -133,3 +133,53 @@ def test_new_file_goes_into_existing_folder_with_old_spelling(tmp_path):
     assert got[12] == "01_SEMESTER/01_marketing/02_Übung/Zusatzmaterialien Case Study/neuer_case_ue3.pdf"
     assert got[20] == "_Ohne_Semester/License Information (Student University of Mannheim)/neue_anleitung.pdf"
     assert all(not it.new_dirs for it in result.items)
+
+
+def test_short_dir_name_is_stable_and_bounded():
+    long_a = "09a_objektorientierte_programmierung_fortgeschrittene_konzepte"
+    long_b = "09b_objektorientierte_programmierung_fortgeschrittene_konzepte"
+    a = pu.short_dir_name(long_a)
+    assert a == pu.short_dir_name(long_a)             # stabil
+    assert len(a) <= pu.MAX_DIR_NAME
+    assert a != pu.short_dir_name(long_b)              # keine Kollision
+    assert pu.short_dir_name("kurzer_name") == "kurzer_name"
+    same_start = pu.short_dir_name("x" * 60 + "_a"), pu.short_dir_name("x" * 60 + "_b")
+    assert same_start[0] != same_start[1]
+
+
+def test_example_path_from_user_test_fits(tmp_path):
+    """Handtest des Nutzers: Basisordner mit etwa 100 Zeichen, tiefe PI1 Video Struktur."""
+    from ilias_sync import mapper
+    from ilias_sync.api import Config, CourseConfig
+    from ilias_sync.crawler import Course, CrawlResult, IliasObject
+
+    base = "/Users/rafik/Library/CloudStorage/OneDrive-Persönlich/01_Universität_Mannheim/pers_test_iliassync"
+    root = pu.Path(base) / "01_Universität_Mannheim"
+    pi1 = Course("crs", 1, "Praktische Informatik I [V] [1. PG] (HWS 2026)", "u1", "HWS 2026", "HWS 2026")
+    folder = "09a Objektorientierte Programmierung: Fortgeschrittene Konzepte"
+    objs = [IliasObject("fold", 10, folder, "u10", path=[pi1.name]),
+            IliasObject("file", 11, "9a_05_Domänenmodell-Konzeptuelle Klassen.mp4", "u11", path=[pi1.name, folder])]
+    cfg = Config(base_dir=None, courses=[CourseConfig(1, pi1.name, "03_praktische_informatik_i")],
+                 semesters={"HWS 2026": "01_semester"})
+    # Kein Ordner vorhanden (tmp_path als lokale Sicht), Zielpfad unter dem langen Basisordner prüfen
+    [item] = mapper.Mapper(cfg, tmp_path).map_crawl(CrawlResult([pi1], {1: objs})).items
+    target = pu.fit_path(root.joinpath(*item.rel_path))
+    assert len(str(target)) <= pu.MAX_PATH_LENGTH
+    assert target.suffix == ".mp4"
+    assert all(len(part) <= pu.MAX_DIR_NAME for part in item.rel_path[:-1])
+
+
+def test_existing_unshortened_folder_is_reused(tmp_path):
+    """Alter Stand: ungekürzter Ordner existiert schon, es darf kein gekürzter daneben entstehen."""
+    from ilias_sync import mapper
+    from ilias_sync.api import Config
+
+    long_name = "09a_objektorientierte_programmierung_fortgeschrittene_konzepte"
+    (tmp_path / "vorlesung" / long_name).mkdir(parents=True)
+    m = mapper.Mapper(Config(base_dir=None), tmp_path)
+    assert m.resolve_folder(("vorlesung",), "09a Objektorientierte Programmierung: Fortgeschrittene Konzepte") == long_name
+    # Schon gekürzt angelegter Ordner wird ebenfalls wiedergefunden
+    short = pu.short_dir_name(long_name)
+    (tmp_path / "neu" / short).mkdir(parents=True)
+    m = mapper.Mapper(Config(base_dir=None), tmp_path)
+    assert m.resolve_folder(("neu",), "09a Objektorientierte Programmierung: Fortgeschrittene Konzepte") == short

@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import pytest
 import requests
 
 from ilias_sync import downloader
@@ -92,7 +93,7 @@ def test_network_error_removes_part_file(tmp_path):
     target = tmp_path / "datei.pdf"
     result = downloader.download_file(FakeSession(requests.ConnectionError("weg")), "u", target)
     assert result.status == "fehler"
-    assert result.error == "ConnectionError"
+    assert result.error == "ILIAS war nicht erreichbar, beim nächsten Sync erneut"
     assert not downloader.part_path(target).exists()
     assert not target.exists()
 
@@ -100,7 +101,7 @@ def test_network_error_removes_part_file(tmp_path):
 def test_http_error(tmp_path):
     result = downloader.download_file(FakeSession(response(b"", status=404)), "u", tmp_path / "x.pdf")
     assert result.status == "fehler"
-    assert result.error == "HTTPError"
+    assert result.error == "Datei in ILIAS nicht gefunden (Fehler 404)"
 
 
 # ---------------- Dateinamen ----------------
@@ -122,3 +123,25 @@ def test_fit_path_shortens_stem_keeps_suffix():
     assert len(str(fitted)) <= 100
     assert fitted.suffix == ".pdf"
     assert fit_path(Path("C:/x/kurz.pdf"), limit=100) == Path("C:/x/kurz.pdf")
+
+
+@pytest.mark.parametrize("error, text", [
+    (requests.Timeout(), "ILIAS hat nicht rechtzeitig geantwortet, beim nächsten Sync erneut"),
+    (requests.exceptions.SSLError(), "Sichere Verbindung zu ILIAS fehlgeschlagen"),
+    (PermissionError(13, "denied"), "Keine Schreibrechte im Zielordner"),
+    (OSError(28, "No space left on device"), "Nicht genug Speicherplatz"),
+    (OSError(5, "I/O"), "Datei konnte nicht gespeichert werden"),
+])
+def test_error_texts_without_class_names(error, text):
+    assert downloader.error_text(error) == text
+
+
+@pytest.mark.parametrize("status, text", [
+    (403, "Kein Zugriff in ILIAS (Fehler 403)"),
+    (503, "ILIAS hatte ein Serverproblem (Fehler 503), beim nächsten Sync erneut"),
+    (418, "ILIAS hat den Download abgelehnt (Fehler 418)"),
+])
+def test_http_error_texts(status, text):
+    r = requests.Response()
+    r.status_code = status
+    assert downloader.error_text(requests.HTTPError(response=r)) == text
