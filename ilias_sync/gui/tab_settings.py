@@ -31,7 +31,7 @@ from ilias_sync.api import ConfigError
 from ilias_sync.gui import logic, theme
 from ilias_sync.gui.controller import Controller, error_text
 from ilias_sync.gui.icons import dot
-from ilias_sync.gui.widgets import Page, SpinBox, button, error_label, hint_label, set_muted, show_error
+from ilias_sync.gui.widgets import IntervalBox, Page, SpinBox, button, error_label, hint_label, set_muted, show_error
 
 log = logging.getLogger(__name__)
 
@@ -80,10 +80,7 @@ class SettingsTab(Page):
                                  "einen neuen Uni Ordner, der erste Sync dorthin braucht einen leeren Ordner."))
 
         # Sync
-        self.interval = SpinBox()
-        self.interval.setRange(15, 1440)
-        self.interval.setSingleStep(15)
-        self.interval.setSuffix(" Minuten")
+        self.interval = IntervalBox()
         self.interval.valueChanged.connect(self._changed)
         self.parallel = SpinBox()
         self.parallel.setRange(1, 5)

@@ -53,6 +53,35 @@ def action_color(kind: ActionKind) -> str:
     }[kind]
 
 
+class IntervalBox(QComboBox):
+    """Auswahl des Sync Intervalls in sinnvollen Stufen statt Minuten. value() und setValue()
+    arbeiten in Minuten wie Config.sync_interval_minutes. Ein Wert außerhalb der Stufen
+    (z. B. aus einer älteren Config) bleibt als eigener Eintrag erhalten."""
+
+    valueChanged = Signal(int)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        for minutes in logic.INTERVAL_PRESETS:
+            self.addItem(logic.interval_text(minutes), minutes)
+        self.currentIndexChanged.connect(lambda _i: self.valueChanged.emit(self.value()))
+
+    def wheelEvent(self, event) -> None:  # noqa: N802
+        event.ignore()   # wie ComboBox: Mausrad scrollt die Seite, ändert nicht die Auswahl
+
+    def value(self) -> int:
+        return int(self.currentData())
+
+    def setValue(self, minutes: int) -> None:  # noqa: N802
+        idx = self.findData(minutes)
+        if idx < 0:
+            pos = sum(1 for i in range(self.count()) if int(self.itemData(i)) < minutes)
+            self.insertItem(pos, logic.interval_text(minutes), minutes)
+            idx = pos
+        self.setCurrentIndex(idx)
+
+
 class ElideDelegate(QStyledItemDelegate):
     """Kürzt Text in einer Tabellenspalte auf eigene Art: vorn (Ordner, Ende sichtbar) oder
     rechts mit sichtbarer Dateiendung (Dateinamen)."""

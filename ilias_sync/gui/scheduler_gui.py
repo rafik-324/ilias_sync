@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 
 from PySide6.QtCore import QObject, QTimer
 
+from ilias_sync.api import Config
 from ilias_sync.gui.controller import Controller
 
 TICK_MS = 30_000
@@ -48,7 +49,8 @@ class Scheduler(QObject):
 
     def _interval(self) -> int:
         cfg = self.controller.config
-        return cfg.sync_interval_minutes if cfg else 60
+        # ohne Config der Standard aus dem Vertrag, keine eigene Zahl
+        return (cfg or Config(base_dir=None)).sync_interval_minutes
 
     def _recompute(self) -> None:
         self.controller.next_sync_at = next_due(self._last_end, self._interval(), self.started_at)

@@ -380,7 +380,8 @@ def test_kurse_ordner_dropdowns_ohne_mausrad(qtbot, fake):
     qtbot.addWidget(w)
     combos = w.courses.table.findChildren(QComboBox)
     assert combos and all(isinstance(c, ComboBox) for c in combos)
-    assert w.settings.interval.__class__.__name__ == "SpinBox"
+    assert w.settings.parallel.__class__.__name__ == "SpinBox"
+    assert w.settings.interval.__class__.__name__ == "IntervalBox"
 
 
 def test_semester_spalte_nur_bei_mehreren_semestern(qtbot, fake):
@@ -785,3 +786,37 @@ def test_fortschritt_wird_gedrosselt(qtbot, fake):
     qtbot.wait(250)
     assert len(got) == 2                             # nichts Neues, keine weiteren Signale
     assert c.last_progress.current == 50
+
+
+
+# ---------------- Sync Intervall ----------------
+
+def test_intervall_auswahl_in_stufen(qtbot, fake):
+    from ilias_sync.api import Config
+    w = MainWindow(Controller(fake))
+    qtbot.addWidget(w)
+    box = w.settings.interval
+    # Standard aus dem Vertrag: einmal am Tag
+    assert Config(base_dir=None).sync_interval_minutes == 1440
+    assert box.value() == 1440 and box.currentText() == "einmal am Tag"
+    texts = [box.itemText(i) for i in range(box.count())]
+    assert texts == ["stündlich", "alle 3 Stunden", "alle 6 Stunden", "alle 12 Stunden", "einmal am Tag"]
+    # ein Wert außerhalb der Stufen bleibt erhalten und wird einsortiert
+    box.setValue(90)
+    assert box.value() == 90 and box.currentText() == "alle 90 Minuten"
+    assert [box.itemData(i) for i in range(box.count())] == [60, 90, 180, 360, 720, 1440]
+
+
+def test_scheduler_ohne_config_nutzt_standard(qtbot, fake_first_run):
+    from ilias_sync.gui.scheduler_gui import Scheduler
+    c = Controller(fake_first_run)
+    c.config = None
+    assert Scheduler(c)._interval() == 1440
+
+
+def test_intervall_texte():
+    from ilias_sync.gui import logic
+    assert logic.interval_text(1440) == "einmal am Tag"
+    assert logic.interval_text(60) == "stündlich"
+    assert logic.interval_text(360) == "alle 6 Stunden"
+    assert logic.interval_text(45) == "alle 45 Minuten"

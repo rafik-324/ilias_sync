@@ -70,6 +70,21 @@ def future_time(when: datetime | None, now: datetime | None = None) -> str:
     return f"{when:%d.%m.%Y %H:%M}"
 
 
+# Stufen für das Sync Intervall in den Einstellungen (Minuten). Standard ist Config():
+# einmal am Tag (Entscheidung des Nutzers 2026-09-26)
+INTERVAL_PRESETS = (60, 180, 360, 720, 1440)
+
+
+def interval_text(minutes: int) -> str:
+    """Lesbarer Name eines Intervalls: "einmal am Tag", "alle 6 Stunden", "stündlich"."""
+    if minutes == 1440:
+        return "einmal am Tag"
+    if minutes % 60 == 0:
+        hours = minutes // 60
+        return "stündlich" if hours == 1 else f"alle {hours} Stunden"
+    return f"alle {minutes} Minuten"
+
+
 def format_size(size: int | None) -> str:
     if size is None:
         return ""
