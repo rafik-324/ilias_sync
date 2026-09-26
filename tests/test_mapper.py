@@ -404,6 +404,8 @@ def test_suggest_courses_in_empty_root_groups_lectures(tmp_path):
         1: "01_marketing",
         2: "02_praktische_informatik_i",
         3: "02_praktische_informatik_i",
+        # Kurs ohne Semester bekommt auch einen Eintrag (Ordner unter _ohne_semester, ohne Nummer)
+        5: "license_information_student_university_of_mannheim",
         6: "03_programmierpraktikum_i",
     }
 
@@ -511,3 +513,42 @@ def test_sheets_fall_back_to_exercise_before_tutorial(tmp_path):
         "Tutorium / t.pdf": "01_SEMESTER/02_fg/02_tutorium/t.pdf",
         "Übungsblätter / ub01.pdf": "01_SEMESTER/02_fg/01_uebung/ub01.pdf",
     }
+
+
+LICENSE = "License Information (Student University of Mannheim)"
+
+
+def test_course_without_semester_gets_config_entry_for_existing_folder(tmp_path):
+    """Lizenzkurs: vorhandener Ordner mit alter Schreibweise wird Config Eintrag, nichts Neues angelegt."""
+    (tmp_path / "_Ohne_Semester" / LICENSE / "Anleitung").mkdir(parents=True)
+    c = crs(342184, LICENSE, heading="MSDNAA")
+    result = CrawlResult([c], {c.ref_id: tree(c, [("fold", "Anleitung", 1), ("file", "Anleitung / Matlab.pdf", 2)])})
+    m = mapper.Mapper(Config(base_dir=None), tmp_path)
+    [suggestion] = m.suggest_courses(result)
+    assert (suggestion.ref_id, suggestion.local_dir) == (342184, LICENSE)
+
+    cfg = Config(base_dir=None, courses=[suggestion])
+    [item] = mapper.Mapper(cfg, tmp_path).map_crawl(result).items
+    assert item.rel_path == ("_Ohne_Semester", LICENSE, "Anleitung", "matlab.pdf")
+    assert not item.new_dirs
+
+
+def test_course_without_semester_new_folder_follows_linux_rule(tmp_path):
+    c = crs(342184, LICENSE, heading="MSDNAA")
+    result = CrawlResult([c], {c.ref_id: tree(c, [("file", "Matlab.pdf", 2)])})
+    [suggestion] = mapper.Mapper(Config(base_dir=None), tmp_path).suggest_courses(result)
+    assert suggestion.local_dir == "license_information_student_university_of_mannheim"
+
+
+def test_course_without_semester_can_be_switched_off(tmp_path):
+    from ilias_sync import state, sync
+
+    c = crs(342184, LICENSE, heading="MSDNAA")
+    result = CrawlResult([c], {c.ref_id: tree(c, [("file", "Matlab.pdf", 2)])})
+    course = CourseConfig(342184, LICENSE, "license_information", download_files=False)
+    cfg = Config(base_dir=None, courses=[course])
+    mapping = mapper.Mapper(cfg, tmp_path).map_crawl(result)
+    with state.State(tmp_path / "index.sqlite3") as st:
+        assert sync.plan(mapping, st, tmp_path, cfg) == []
+        course.download_files = True
+        assert [j.target.name for j in sync.plan(mapping, st, tmp_path, cfg)] == ["matlab.pdf"]

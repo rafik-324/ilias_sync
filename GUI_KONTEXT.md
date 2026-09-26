@@ -83,6 +83,8 @@ class ActionKind(Enum):
     CONFLICT = "conflict"        # Zielname belegt: vorhandene Datei bleibt, ILIAS Datei kommt als *_ilias_<Datum> daneben
     SKIP_REMOVED = "skip_removed"  # vom Nutzer entfernt, wird nicht geladen
     SKIP_IGNORED = "skip_ignored"  # liegt in [ignore]
+    SKIP_TOO_LONG = "skip_too_long"  # Zielpfad zu lang: wird nicht geladen. dry_run liefert sie mit dem geplanten
+                                     # Ziel als local_path, sync zählt sie als Fehler ("Pfad zu lang (263 Zeichen): ...")
     CREATE_DIR = "create_dir"
     UNASSIGNED = "unassigned"    # Kurs ohne Zuordnung, Ziel _neue_kurse (bzw. ein vorhandenes _Neue_Kurse)
 

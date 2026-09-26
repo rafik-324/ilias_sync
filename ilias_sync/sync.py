@@ -103,14 +103,21 @@ def plan(mapping: MappingResult, st: State, root: Path, cfg: Config, problems: l
         try:
             target = fit_path(root.joinpath(*item.rel_path))
         except ValueError:
-            text = f"Pfad zu lang ({len(str(root.joinpath(*item.rel_path)))} Zeichen): {'/'.join(item.rel_path)}"
+            wanted_target = root.joinpath(*item.rel_path)
+            text = too_long_text(wanted_target, item)
             log.warning("Übersprungen: %s", text)
             if problems is not None:
                 problems.append(text)
+            # In der Vorschau sichtbar, beim Sync nur als Fehler gemeldet
+            jobs.append(Job(ActionKind.SKIP_TOO_LONG, item, wanted_target, entry))
             continue
         kind = ActionKind.CONFLICT if target.exists() else ActionKind.NEW
         jobs.append(Job(kind, item, target, entry))
     return jobs
+
+
+def too_long_text(target: Path, item: MappedItem) -> str:
+    return f"Pfad zu lang ({len(str(target))} Zeichen): {'/'.join(item.rel_path)}"
 
 
 def planned_actions(jobs: list[Job], mapping: MappingResult, root: Path) -> list[PlannedAction]:
@@ -206,6 +213,7 @@ def execute(
     cancel: threading.Event | None = None,
     relogin: Callable[[], None] | None = None,
     throttle: Throttle | None = None,
+    extra_errors: list[str] | None = None,
 ) -> tuple[SyncResult, list[Outcome]]:
     """Geplante Aktionen ausführen und im Index festhalten. Abbruch über cancel:
     laufende Downloads enden, geladene Dateien bleiben, .part Dateien werden entfernt."""
@@ -244,11 +252,12 @@ def execute(
                 raise
     finally:
         counts = {s: sum(o.status == s for o in outcomes) for s in ("neu", "fehler")}
-        run = SyncRun(started, datetime.now(), new=counts["neu"], updated=0, errors=counts["fehler"],
-                      cancelled=cancel.is_set())
+        # extra_errors: z. B. zu lange Pfade aus plan(), zählen wie Download Fehler
+        run = SyncRun(started, datetime.now(), new=counts["neu"], updated=0,
+                      errors=counts["fehler"] + len(extra_errors or []), cancelled=cancel.is_set())
         st.finish_run(run_id, run)
 
-    errors = [f"{o.job.target.name}: {o.error}" for o in outcomes if o.status == "fehler"]
+    errors = [*(extra_errors or []), *(f"{o.job.target.name}: {o.error}" for o in outcomes if o.status == "fehler")]
     unassigned = [IliasCourse(cm.course.ref_id, cm.course.name, cm.semester, cm.course.url)
                   for cm in unassigned_courses(mapping)]
     return SyncResult(run, new_files, unassigned, errors, changed), outcomes
