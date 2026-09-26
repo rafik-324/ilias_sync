@@ -569,3 +569,66 @@ def test_sync_zaehlt_zu_lange_pfade_als_fehler(qtbot, fake):
     result = fake.sync(lambda p: None, threading.Event())
     too_long = [e for e in result.errors if e.startswith("Pfad zu lang (")]
     assert len(too_long) == 1 and result.run.errors == len(result.errors)
+
+
+# ---------------- Wizard Fenstergröße ----------------
+
+def _wizard_bis_ende(qtbot, wiz, api, sizes):
+    page = wiz.currentPage()
+    sizes.append(wiz.size())
+    page.form.user.setText("musterstudi")
+    page.form.password.setText("geheim")
+    page.form.submit()
+    qtbot.waitUntil(page.isComplete, timeout=5000)
+    wiz.next()
+    page = wiz.currentPage()
+    page.path.setText(str(api.workdir / ("sehr_langer_ordnername_" * 8) / "Uni"))
+    page._run_check()
+    qtbot.wait(20)
+    sizes.append(wiz.size())
+    wiz.next()
+    for _ in range(2):          # Kurse, Vorschau
+        page = wiz.currentPage()
+        qtbot.waitUntil(page.isComplete, timeout=10_000)
+        qtbot.wait(20)
+        sizes.append(wiz.size())
+        wiz.next()
+    qtbot.wait(20)
+    sizes.append(wiz.size())    # Fertig eingerichtet
+    wiz.back()
+    qtbot.wait(20)
+    sizes.append(wiz.size())
+
+
+def test_wizard_groesse_bleibt_auf_allen_seiten_gleich(qtbot, fake_first_run, monkeypatch):
+    from ilias_sync.gui.setup_wizard import START_SIZE
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    wiz = SetupWizard(fake_first_run)
+    qtbot.addWidget(wiz)
+    wiz.show()
+    sizes = []
+    _wizard_bis_ende(qtbot, wiz, fake_first_run, sizes)
+    assert len(sizes) == 6
+    assert all(s == START_SIZE for s in sizes), sizes
+
+
+def test_wizard_mindestgroesse_verhindert_wachsen_ohne_umbruch(qtbot, fake_first_run, monkeypatch):
+    from PySide6.QtWidgets import QLabel
+    from ilias_sync.gui import setup_wizard
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    # späterer Fehler simuliert: langes Label ohne Umbruch auf der letzten Seite, Umbruch Schutz aus.
+    # Die explizite Mindestgröße muss das Fenster trotzdem bei der Startgröße halten
+    orig_init = setup_wizard.FinishPage.__init__
+
+    def init(self):
+        orig_init(self)
+        lang = QLabel("sehr langer Text ohne Umbruch " * 20)
+        self.layout().insertWidget(0, lang)
+    monkeypatch.setattr(setup_wizard.FinishPage, "__init__", init)
+    monkeypatch.setattr(setup_wizard.SetupWizard, "_wrap_labels", lambda self: None)
+    wiz = SetupWizard(fake_first_run)
+    qtbot.addWidget(wiz)
+    wiz.show()
+    sizes = []
+    _wizard_bis_ende(qtbot, wiz, fake_first_run, sizes)
+    assert sizes[-2] == setup_wizard.START_SIZE, sizes

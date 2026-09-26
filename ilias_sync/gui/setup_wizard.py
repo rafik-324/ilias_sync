@@ -14,7 +14,7 @@ import logging
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -432,11 +432,13 @@ class FinishPage(QWizardPage):
         self.start_now = QCheckBox("Synchronisierung jetzt starten")
         self.start_now.setChecked(True)
         lay = QVBoxLayout(self)
-        lay.addWidget(QLabel(
+        info = QLabel(
             "Beim ersten Sync werden alle Materialien deiner Kurse geladen. Das kann je nach Anzahl "
             "der Videos einige Zeit dauern und viel Speicherplatz belegen. Videos lassen sich pro Kurs "
             "im Fenster unter Kurse abschalten."
-        ))
+        )
+        info.setWordWrap(True)
+        lay.addWidget(info)
         lay.addSpacing(12)
         lay.addWidget(self.start_now)
         lay.addStretch(1)
@@ -447,6 +449,10 @@ class FinishPage(QWizardPage):
 
 # ---------------- Wizard ----------------
 
+START_SIZE = QSize(760, 560)
+MIN_SIZE = QSize(640, 480)
+
+
 class SetupWizard(QWizard):
     def __init__(self, api) -> None:
         super().__init__()
@@ -456,7 +462,10 @@ class SetupWizard(QWizard):
         self.setWindowIcon(app_icon())
         self.setWizardStyle(QWizard.WizardStyle.ModernStyle)
         self.setOption(QWizard.WizardOption.NoBackButtonOnStartPage, True)
-        self.resize(760, 560)
+        # Explizite Mindestgröße: sonst übernimmt QWizard beim Seitenwechsel die Mindestgröße
+        # des Layouts, und eine breite Seite vergrößert das Fenster (so geschehen auf "Fertig")
+        self.setMinimumSize(MIN_SIZE)
+        self.resize(START_SIZE)
         self.setButtonText(QWizard.WizardButton.NextButton, "Weiter")
         self.setButtonText(QWizard.WizardButton.BackButton, "Zurück")
         self.setButtonText(QWizard.WizardButton.FinishButton, "Fertig")
@@ -483,6 +492,13 @@ class SetupWizard(QWizard):
             page.setTitle(f'<span style="font-size:20px; font-weight:600;">{page.title()}</span>'
                           f'<br><span style="font-size:13px; font-weight:400;">{page.subTitle()}</span>')
             page.setSubTitle("")
+
+        self._wrap_labels()
+
+    def _wrap_labels(self) -> None:
+        """Kein Label darf die Seite breiter machen als das Fenster (lange Texte, Pfade)."""
+        for label in self.findChildren(QLabel):
+            label.setWordWrap(True)
 
     def start_sync_requested(self) -> bool:
         return self.finish_page.start_now.isChecked()
