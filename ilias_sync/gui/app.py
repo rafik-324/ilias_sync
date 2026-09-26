@@ -32,7 +32,8 @@ from ilias_sync.gui.window import MainWindow
 
 log = logging.getLogger("ilias_sync.gui")
 
-LOG_FORMAT = "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
+# gleiches Format wie der CLI Einstieg (__main__.setup_logging), beide schreiben in dieselbe Datei
+LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 
 
 def setup_logging(api) -> None:
@@ -43,7 +44,7 @@ def setup_logging(api) -> None:
     path = api.log_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     handler = RotatingFileHandler(path, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
-    handler.setFormatter(logging.Formatter(LOG_FORMAT, "%Y-%m-%d %H:%M:%S"))
+    handler.setFormatter(logging.Formatter(LOG_FORMAT))
     root.addHandler(handler)
     root.setLevel(logging.INFO)
 

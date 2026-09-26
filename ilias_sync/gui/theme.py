@@ -64,8 +64,8 @@ LIGHT = Tokens(
     faint="#9aa1ab",
     hover="#eceef2",
     pressed="#e1e4e9",
-    accent="#2458d6",
-    accent_hover="#1d4bbd",
+    accent="#2f5bd8",          # Markenblau aus dem Logo
+    accent_hover="#2650c2",
     accent_soft="#e5edfc",
     accent_text="#ffffff",
     success="#15803d",
@@ -90,8 +90,8 @@ DARK = Tokens(
     faint="#6b727d",
     hover="#232830",
     pressed="#2b313a",
-    accent="#5b8cf5",
-    accent_hover="#739df7",
+    accent="#7d9cff",          # Markenblau hell aus dem Logo
+    accent_hover="#95afff",
     accent_soft="#1f2b44",
     accent_text="#0b1020",
     success="#4ade80",
@@ -167,7 +167,7 @@ QToolTip {{
 
 /* Navigation */
 #sidebar {{ background: {t.sidebar}; border-right: 1px solid {t.border}; }}
-#brand {{ font-size: 15px; font-weight: 600; }}
+#brand {{ font-size: 17px; font-weight: 600; }}
 #nav {{ background: transparent; border: none; }}
 #nav::item {{
     color: {t.muted}; padding: 7px 10px; margin: 1px 10px; border-radius: 8px; border: none;

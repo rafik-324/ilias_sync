@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QProgressBar,
     QPushButton,
+    QSpinBox,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -43,6 +45,32 @@ def action_color(kind: ActionKind) -> str:
         ActionKind.CREATE_DIR: t.muted,
         ActionKind.UNASSIGNED: t.warning,
     }[kind]
+
+
+class ComboBox(QComboBox):
+    """Dropdown, dessen Auswahl sich nicht durch Mausrad oder Trackpad ändert.
+
+    In scrollbaren Tabellen und Seiten sprang die Auswahl sonst beim Scrollen um.
+    Das Rad scrollt stattdessen den umgebenden Bereich, gewählt wird per Klick oder Tastatur.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def wheelEvent(self, event) -> None:  # noqa: N802
+        event.ignore()
+
+
+class SpinBox(QSpinBox):
+    """Zahlenfeld ohne Mausrad Änderung, aus demselben Grund wie ComboBox."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def wheelEvent(self, event) -> None:  # noqa: N802
+        event.ignore()
 
 
 def error_label() -> QLabel:
@@ -162,16 +190,10 @@ class ProgressPanel(QWidget):
         self.show()
 
     def update_progress(self, p: Progress) -> None:
+        self.bar.setRange(0, p.total or 0)   # ohne Gesamtzahl unbestimmter Balken
         if p.total:
-            self.bar.setRange(0, p.total)
             self.bar.setValue(p.current)
-            text = f"{p.phase} {p.current} von {p.total}"
-        else:
-            self.bar.setRange(0, 0)
-            text = f"{p.phase} ..."
-        if p.detail:
-            text += f": {p.detail}"
-        self.label.setText(text)
+        self.label.setText(logic.progress_text(p))
 
     def stop(self) -> None:
         self.hide()

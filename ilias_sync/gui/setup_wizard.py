@@ -19,7 +19,6 @@ from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
-    QComboBox,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
@@ -38,6 +37,7 @@ from ilias_sync.gui import theme
 from ilias_sync.gui.controller import error_text
 from ilias_sync.gui.icons import app_icon
 from ilias_sync.gui.widgets import (
+    ComboBox,
     LoginForm,
     PreviewTree,
     ProgressPanel,
@@ -181,8 +181,8 @@ class BaseDirPage(QWizardPage):
             self.structure.setText("\n".join([
                 str(path),
                 f"└── {self.root_name}/",
-                "    └── 01_SEMESTER/",
-                "        └── NN_kursname/NN_Kategorie/ ...",
+                "    └── 01_semester/",
+                "        └── NN_kursname/NN_kategorie/ ...",
             ]))
         else:
             self.structure.setText("")
@@ -257,7 +257,7 @@ class CoursesPage(QWizardPage):
         lay.addWidget(self.table, 1)
         lay.addWidget(hint_label(
             "Gelb markierte Zuordnungen sind unsicher. Neue Ordner werden erst beim Sync angelegt. "
-            "\"Nicht zugeordnet\" legt Dateien vorerst unter _Neue_Kurse ab."
+            "\"Nicht zugeordnet\" legt Dateien vorerst unter _neue_kurse ab."
         ))
 
     def initializePage(self) -> None:  # noqa: N802
@@ -302,7 +302,7 @@ class CoursesPage(QWizardPage):
             self.table.setItem(row, self.COL_NAME, QTableWidgetItem(s.course.name))
             self.table.setItem(row, self.COL_SEM, QTableWidgetItem(f"{s.course.semester or '?'} → {s.semester_dir}"))
 
-            combo = QComboBox()
+            combo = ComboBox()
             combo.setEditable(True)
             combo.addItem(NICHT_ZUGEORDNET)
             try:

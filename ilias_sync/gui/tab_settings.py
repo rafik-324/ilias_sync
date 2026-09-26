@@ -21,7 +21,6 @@ from PySide6.QtWidgets import (
     QListWidget,
     QMessageBox,
     QScrollArea,
-    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -32,7 +31,7 @@ from ilias_sync.api import ConfigError
 from ilias_sync.gui import logic, theme
 from ilias_sync.gui.controller import Controller, error_text
 from ilias_sync.gui.icons import dot
-from ilias_sync.gui.widgets import Page, button, error_label, hint_label, set_muted, show_error
+from ilias_sync.gui.widgets import Page, SpinBox, button, error_label, hint_label, set_muted, show_error
 
 log = logging.getLogger(__name__)
 
@@ -81,12 +80,12 @@ class SettingsTab(Page):
                                  "einen neuen Uni Ordner, der erste Sync dorthin braucht einen leeren Ordner."))
 
         # Sync
-        self.interval = QSpinBox()
+        self.interval = SpinBox()
         self.interval.setRange(15, 1440)
         self.interval.setSingleStep(15)
         self.interval.setSuffix(" Minuten")
         self.interval.valueChanged.connect(self._changed)
-        self.parallel = QSpinBox()
+        self.parallel = SpinBox()
         self.parallel.setRange(1, 5)
         self.parallel.setToolTip("Gleichzeitige Downloads. Höhere Werte belasten den ILIAS Server stärker.")
         self.parallel.valueChanged.connect(self._changed)
@@ -118,7 +117,7 @@ class SettingsTab(Page):
         v_sem = QVBoxLayout(box_sem)
         v_sem.setContentsMargins(0, 8, 0, 0)
         v_sem.setSpacing(10)
-        v_sem.addWidget(hint_label("Welches Semester in welchem Ordner landet, z. B. HWS 2026 in 01_SEMESTER. "
+        v_sem.addWidget(hint_label("Welches Semester in welchem Ordner landet, z. B. HWS 2026 in 01_semester. "
                                    "Leere Einträge werden beim nächsten Sync mit der nächsten Nummer angelegt."))
         v_sem.addWidget(self.sem_table)
 

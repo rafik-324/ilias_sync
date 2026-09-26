@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from ilias_sync.api import ActionKind, ChangedFile, Config, DownloadedFile, PlannedAction
+from ilias_sync.api import ActionKind, ChangedFile, Config, DownloadedFile, PlannedAction, Progress, linux_name
 
 # ---------------- Zeitangaben ----------------
 
@@ -109,6 +109,18 @@ def course_display_name(ilias_name: str, pattern: str | None = None) -> str:
     return " ".join(name.split()).strip() or ilias_name
 
 
+def progress_text(p: Progress) -> str:
+    """Text zum Fortschritt, z. B. "Herunterladen 3 von 12: a.pdf" oder "Durchsuchen ... 37 ILIAS Seiten gelesen"."""
+    if p.total:
+        text = f"{p.phase} {p.current} von {p.total}"
+        return f"{text}: {p.detail}" if p.detail else text
+    # ohne Gesamtzahl zählt current nur mit (z. B. gelesene Seiten beim Durchsuchen)
+    text = f"{p.phase} ..."
+    if p.current:
+        text += f" {p.current}"
+    return f"{text} {p.detail}" if p.detail else text
+
+
 # ---------------- Benachrichtigungen ----------------
 
 def _plural(n: int, singular: str, plural: str) -> str:
@@ -163,7 +175,7 @@ ACTION_LABELS: dict[ActionKind, str] = {
     ActionKind.NEW: "Neu",
     ActionKind.CHANGED: "In ILIAS geändert",
     ActionKind.UPDATE: "Aktualisierung",
-    ActionKind.CONFLICT: "Konflikt",
+    ActionKind.CONFLICT: "Name belegt",
     ActionKind.SKIP_REMOVED: "Übersprungen (entfernt)",
     ActionKind.SKIP_IGNORED: "Übersprungen (ignoriert)",
     ActionKind.CREATE_DIR: "Neuer Ordner",
@@ -173,18 +185,18 @@ ACTION_LABELS: dict[ActionKind, str] = {
 ACTION_HINTS: dict[ActionKind, str] = {
     ActionKind.NEW: "Datei wird neu heruntergeladen",
     ActionKind.CHANGED: "Neue Version in ILIAS. Wird nicht automatisch geladen, du entscheidest in der Übersicht",
-    ActionKind.UPDATE: "In ILIAS geändert. Die alte Version wird zu *_alt_<Datum> umbenannt",
-    ActionKind.CONFLICT: "Von dir lokal geändert. Neue Version kommt als *_ilias_<Datum> daneben",
+    ActionKind.UPDATE: "Wird nicht mehr verwendet",
+    ActionKind.CONFLICT: "Name schon belegt. Deine Datei bleibt, die ILIAS Datei kommt als *_ilias_<Datum> daneben",
     ActionKind.SKIP_REMOVED: "Von dir verschoben oder gelöscht, wird nicht erneut geladen",
     ActionKind.SKIP_IGNORED: "Liegt in einem ignorierten Ordner",
     ActionKind.CREATE_DIR: "Ordner wird angelegt",
-    ActionKind.UNASSIGNED: "Kurs ist noch keinem Ordner zugeordnet, Ablage unter _Neue_Kurse",
+    ActionKind.UNASSIGNED: "Kurs ist noch keinem Ordner zugeordnet, Ablage unter _neue_kurse",
 }
 
 SKIP_KINDS = {ActionKind.SKIP_REMOVED, ActionKind.SKIP_IGNORED}
 
-# UPDATE und CONFLICT erzeugt das Backend nicht mehr, daher nicht in der Legende
-LEGEND_KINDS = [k for k in ActionKind if k not in (ActionKind.UPDATE, ActionKind.CONFLICT)]
+# UPDATE erzeugt das Backend nicht mehr, daher nicht in der Legende
+LEGEND_KINDS = [k for k in ActionKind if k != ActionKind.UPDATE]
 
 
 @dataclass
@@ -253,7 +265,7 @@ class PreviewSummary:
         if self.updates:
             parts.append(_plural(self.updates, "Aktualisierung", "Aktualisierungen"))
         if self.conflicts:
-            parts.append(_plural(self.conflicts, "Konflikt", "Konflikte"))
+            parts.append(f"{self.conflicts} mit belegtem Namen")
         if self.unassigned:
             parts.append(f"{self.unassigned} nicht zugeordnet")
         if self.new_dirs:
@@ -300,10 +312,8 @@ def next_number(existing: list[str]) -> int:
 
 
 def suggest_course_dir(ilias_name: str, existing: list[str], pattern: str | None = None) -> str:
-    """Vorschlag "NN_kursname": nächste freie Nummer, klein, Leerzeichen zu _."""
-    name = _nfc(course_display_name(ilias_name, pattern)).lower()
-    name = re.sub(r'[<>:"/\\|?*]', "", name)
-    name = re.sub(r"\s+", "_", name).strip("._")
+    """Vorschlag "NN_kursname" nach der Namensregel, nächste freie Nummer."""
+    name = linux_name(course_display_name(ilias_name, pattern)).strip("._-")
     return f"{next_number(existing):02d}_{name or 'kurs'}"
 
 

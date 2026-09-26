@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from ilias_sync.api import ActionKind, ChangedFile, Config, DownloadedFile, ItemStatus, PlannedAction
+from ilias_sync.api import ActionKind, ChangedFile, Config, DownloadedFile, ItemStatus, PlannedAction, Progress
 from ilias_sync.gui import logic
 from ilias_sync.gui.scheduler_gui import START_DELAY, next_due
 
@@ -123,7 +123,7 @@ def test_summarize_text():
         _action(ActionKind.SKIP_IGNORED, "e"),
     ]
     assert logic.summarize(actions).text() == (
-        "2 neue Dateien (2,0 MB), 1 Aktualisierung, 1 Konflikt, 1 übersprungen"
+        "2 neue Dateien (2,0 MB), 1 Aktualisierung, 1 mit belegtem Namen, 1 übersprungen"
     )
 
 
@@ -142,7 +142,7 @@ def test_suggest_course_dir(name, existing, expected):
 
 def test_suggest_course_dir_nfc():
     nfd = "Übung (HWS 2026)"  # Ü in NFD wie auf macOS
-    assert logic.suggest_course_dir(nfd, []) == "01_übung"
+    assert logic.suggest_course_dir(nfd, []) == "01_uebung"
 
 
 def _cfg(**kw) -> Config:
@@ -241,3 +241,19 @@ def test_geaendert_menue_und_vorschau():
     assert ActionKind.CHANGED in logic.LEGEND_KINDS
     assert ActionKind.UPDATE not in logic.LEGEND_KINDS
     assert set(logic.ACTION_LABELS) == set(ActionKind) == set(logic.ACTION_HINTS)
+
+
+def test_fortschritt_text():
+    assert logic.progress_text(Progress("Herunterladen", 3, 12, "a.pdf")) == "Herunterladen 3 von 12: a.pdf"
+    assert logic.progress_text(Progress("Herunterladen", 3, 12, None)) == "Herunterladen 3 von 12"
+    # echtes Backend: beim Durchsuchen keine Gesamtzahl, current = gelesene Seiten
+    assert logic.progress_text(Progress("Durchsuchen", 37, None, "ILIAS Seiten gelesen")) == \
+        "Durchsuchen ... 37 ILIAS Seiten gelesen"
+    assert logic.progress_text(Progress("Anmelden", 0, None, None)) == "Anmelden ..."
+
+
+def test_namensregel_kommt_aus_api():
+    # keine eigene Kopie mehr, die GUI nutzt die Funktion des Backends über api.py
+    from ilias_sync import api
+    assert logic.linux_name is api.linux_name
+    assert logic.linux_name("02_Übung") == "02_uebung"

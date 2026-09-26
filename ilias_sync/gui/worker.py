@@ -12,7 +12,7 @@ import logging
 import threading
 from typing import Any, Callable
 
-from PySide6.QtCore import QObject, QThread, Signal
+from PySide6.QtCore import QObject, Qt, QThread, Signal
 
 from ilias_sync.api import Progress
 
@@ -82,6 +82,11 @@ class Task(QObject):
         self.worker.progress.connect(self.progress)
         self.worker.finished.connect(self._on_finished)
         self.worker.failed.connect(self._on_failed)
+        # Thread sofort im Worker Thread beenden (quit ist threadsicher). Sonst endet er erst,
+        # wenn die GUI das Signal verarbeitet, und wait() beim Beenden hinge bis zum Timeout
+        direct = Qt.ConnectionType.DirectConnection
+        self.worker.finished.connect(self.thread.quit, direct)
+        self.worker.failed.connect(self.thread.quit, direct)
 
     def start(self) -> "Task":
         Task._running.add(self)

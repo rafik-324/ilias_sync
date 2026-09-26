@@ -1,30 +1,46 @@
 """
-Icons der App, per QPainter erzeugt (Platzhalter bis finale Icons existieren).
+Icons der App.
 
-Motiv: Pfeil nach unten in eine Ablage (Download). Zustände werden über ein
-Abzeichen unten rechts dargestellt. Auf macOS entstehen einfarbige Template
-Images (setIsMask), die das System an hell und dunkel anpasst. Auf Windows
-werden farbige Varianten für hellen und dunklen Infobereich erzeugt.
+Logo (Richtung 1b aus dem Design Handoff): das "i" als Download Symbol, Punkt oben,
+Stamm als Pfeil nach unten. Die finalen SVGs liegen in ``assets/`` und werden für
+App Icon und Logo in der Seitenleiste direkt gerendert. Das Tray Icon zeichnet
+denselben Glyph per QPainter nach (Geometrie aus der README, viewBox 48 × 72),
+weil es Zustände (Badge), eine Pfeil Animation beim Sync und auf macOS ein
+einfarbiges Template Image (setIsMask) braucht, das das System an hell und
+dunkel anpasst. Auf Windows werden die farbigen Varianten verwendet.
 """
 
 from __future__ import annotations
 
 import sys
 from enum import Enum
+from functools import lru_cache
+from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QGuiApplication, QIcon, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtSvg import QSvgRenderer
 
 IS_MAC = sys.platform == "darwin"
 
-UNI_BLAU = QColor("#003056")
+# Liegt im PyInstaller Bundle unter ilias_sync/gui/assets, __file__ zeigt dort hinein
+ASSETS = Path(__file__).resolve().parent / "assets"
+ASSET_FILES = ("icon_light.svg", "icon_dark.svg", "app_icon.svg", "app_icon_dark.svg")
+
+# Design Tokens aus dem Handoff (nur Logo und Akzent)
+BLAU = "#2F5BD8"
+BLAU_HELL = "#7D9CFF"      # Blau im dunklen Modus
+INK = "#141416"
+WEISS = "#FFFFFF"
+
 FARBE_FEHLER = QColor("#d13438")
 FARBE_LOGIN = QColor("#e8912d")
 FARBE_PAUSE = QColor("#7a7a7a")
-FARBE_SYNC = QColor("#2b88d8")
 
-SYNC_FRAMES = 4
-_SIZES = (16, 20, 24, 32, 48, 64)
+# Pfeil Animation: 900 ms Zyklus laut README, 10 Bilder zu je 90 ms
+SYNC_FRAMES = 10
+SYNC_FRAME_MS = 90
+_SIZES = (16, 18, 20, 22, 24, 32, 36, 44, 48, 64)
 
 
 class IconState(Enum):
@@ -42,129 +58,178 @@ def is_dark_mode() -> bool:
     return QGuiApplication.styleHints().colorScheme() == Qt.ColorScheme.Dark
 
 
-def _draw_glyph(p: QPainter, color: QColor, arrow_offset: float = 0.0) -> None:
-    """Zeichnet Pfeil und Ablage im 64er Koordinatensystem."""
-    pen = QPen(color, 6.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
-    p.setPen(pen)
-    p.setBrush(Qt.BrushStyle.NoBrush)
-    # Ablage
-    tray = QPainterPath()
-    tray.moveTo(10, 38)
-    tray.lineTo(10, 54)
-    tray.lineTo(54, 54)
-    tray.lineTo(54, 38)
-    p.drawPath(tray)
-    # Pfeil
-    y = arrow_offset
-    p.drawLine(QPointF(32, 6 + y), QPointF(32, 36 + y))
-    head = QPainterPath()
-    head.moveTo(20, 25 + y)
-    head.lineTo(32, 37 + y)
-    head.lineTo(44, 25 + y)
-    p.drawPath(head)
+def asset_path(name: str) -> Path:
+    return ASSETS / name
 
 
-def _clear_badge_area(p: QPainter) -> None:
-    p.save()
-    p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
-    p.setPen(Qt.PenStyle.NoPen)
-    p.setBrush(QBrush(Qt.GlobalColor.black))
-    p.drawEllipse(QPointF(49, 49), 17, 17)
-    p.restore()
+# ---------------- SVG Logo ----------------
 
-
-def _draw_badge(p: QPainter, state: IconState, fill: QColor, mark: QColor | None) -> None:
-    """Abzeichen unten rechts. mark=None bedeutet: Zeichen ausstanzen (Template)."""
-    _clear_badge_area(p)
-    p.setPen(Qt.PenStyle.NoPen)
-    p.setBrush(fill)
-    p.drawEllipse(QPointF(49, 49), 14, 14)
-
-    p.save()
-    if mark is None:
-        p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
-        mark = QColor(Qt.GlobalColor.black)
-    p.setBrush(mark)
-    if state == IconState.ERROR:
-        p.drawRoundedRect(QRectF(46, 38, 6, 14), 2.5, 2.5)
-        p.drawEllipse(QPointF(49, 57), 3.2, 3.2)
-    elif state == IconState.PAUSED:
-        p.drawRect(QRectF(42.5, 41, 5, 16))
-        p.drawRect(QRectF(50.5, 41, 5, 16))
-    elif state == IconState.LOGIN:
-        # Schloss
-        p.drawRoundedRect(QRectF(41, 47, 16, 11), 2, 2)
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.setPen(QPen(mark, 3.2))
-        p.drawArc(QRectF(44, 39, 10, 14), 0, 180 * 16)
-    p.restore()
-
-
-def _render(size: int, state: IconState, frame: int, template: bool, dark: bool) -> QPixmap:
-    pm = QPixmap(size, size)
+def _render_svg(name: str, width: int, height: int) -> QPixmap:
+    renderer = QSvgRenderer(str(asset_path(name)))
+    pm = QPixmap(width, height)
     pm.fill(Qt.GlobalColor.transparent)
     p = QPainter(pm)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    p.scale(size / 64, size / 64)
-
-    if template:
-        glyph = QColor(Qt.GlobalColor.black)
-    else:
-        glyph = QColor("#f3f3f3") if dark else QColor("#1f1f1f")
-
-    offset = 0.0
-    if state == IconState.SYNCING:
-        offset = (frame % SYNC_FRAMES) * 3.0 - 3.0
-        if not template:
-            glyph = FARBE_SYNC if not dark else QColor("#6cb8f6")
-    _draw_glyph(p, glyph, offset)
-
-    if state in (IconState.ERROR, IconState.LOGIN, IconState.PAUSED):
-        if template:
-            _draw_badge(p, state, QColor(Qt.GlobalColor.black), None)
-        else:
-            fill = {IconState.ERROR: FARBE_FEHLER, IconState.LOGIN: FARBE_LOGIN, IconState.PAUSED: FARBE_PAUSE}[state]
-            _draw_badge(p, state, fill, QColor(Qt.GlobalColor.white))
+    renderer.render(p, QRectF(0, 0, width, height))
     p.end()
     return pm
 
 
-def tray_icon(state: IconState, frame: int = 0, dark: bool | None = None) -> QIcon:
-    """Icon für Tray bzw. Menüleiste im passenden Stil der Plattform."""
-    template = IS_MAC
+@lru_cache(maxsize=None)
+def app_icon(dark: bool = False) -> QIcon:
+    """App Icon (Quadrat mit Glyph) für Fenster, Dialoge und QApplication."""
+    name = "app_icon_dark.svg" if dark else "app_icon.svg"
+    icon = QIcon()
+    for size in (16, 24, 32, 48, 64, 128, 256, 512):
+        icon.addPixmap(_render_svg(name, size, size))
+    return icon
+
+
+def brand_pixmap(height: int, dark: bool | None = None) -> QPixmap:
+    """Glyph für die Seitenleiste (Seitenverhältnis 2:3), scharf auf Retina."""
     if dark is None:
         dark = is_dark_mode()
+    ratio = 2
+    width = round(height * 48 / 72)
+    pm = _render_svg("icon_dark.svg" if dark else "icon_light.svg", width * ratio, height * ratio)
+    pm.setDevicePixelRatio(ratio)
+    return pm
+
+
+# ---------------- Tray Glyph ----------------
+
+def _smooth(x: float) -> float:
+    x = min(max(x, 0.0), 1.0)
+    return x * x * (3 - 2 * x)
+
+
+def sync_pose(frame: int) -> tuple[float, float, float]:
+    """(Pfeil y, Pfeil Deckkraft, Punkt y) für ein Bild der Animation, in viewBox Einheiten.
+
+    Pfeil: fährt nach unten aus (12, ausblenden), springt nach oben (−14) und fährt ein.
+    Punkt: hüpft synchron (−5, dann +1, dann Ruhe). Werte aus der README.
+    """
+    t = (frame % SYNC_FRAMES) / SYNC_FRAMES
+    if t <= 0.4:
+        u = _smooth(t / 0.4)
+        arrow_y, arrow_op = 12 * u, 1 - u
+    else:
+        u = _smooth((t - 0.41) / 0.59)
+        arrow_y, arrow_op = -14 * (1 - u), u
+    if t <= 0.3:
+        dot_y = -5 * _smooth(t / 0.3)
+    elif t <= 0.55:
+        dot_y = -5 + 6 * _smooth((t - 0.3) / 0.25)
+    else:
+        dot_y = 1 - _smooth((t - 0.55) / 0.45)
+    return arrow_y, arrow_op, dot_y
+
+
+# Standbild für den Sync, wenn "Bewegung reduzieren" aktiv ist: Pfeil halb ausgefahren
+STATIC_SYNC_POSE = (6.0, 0.55, -2.0)
+
+
+def _draw_glyph(p: QPainter, dot: QColor, arrow: QColor, pose: tuple[float, float, float] = (0, 1, 0)) -> None:
+    """Glyph im 48 × 72 Koordinatensystem (Geometrie aus assets/icon_light.svg)."""
+    arrow_y, arrow_op, dot_y = pose
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(dot)
+    p.drawEllipse(QPointF(24, 10 + dot_y), 8, 8)
+    if arrow_op <= 0.01:
+        return
+    color = QColor(arrow)
+    color.setAlphaF(color.alphaF() * arrow_op)
+    p.setPen(QPen(color, 8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    path = QPainterPath()
+    path.moveTo(24, 26 + arrow_y)
+    path.lineTo(24, 60 + arrow_y)
+    path.moveTo(12, 48 + arrow_y)
+    path.lineTo(24, 60 + arrow_y)
+    path.lineTo(36, 48 + arrow_y)
+    p.drawPath(path)
+
+
+def _draw_badge(p: QPainter, size: int, state: IconState, fill: QColor) -> None:
+    """Zustand unten rechts, in Form unterscheidbar (auch einfarbig in der macOS Menüleiste):
+    Fehler = voller Punkt, Login nötig = Ring, Pausiert = zwei Balken."""
+    center = QPointF(size * 0.78, size * 0.76)
+    r = size * 0.2
+    p.save()
+    p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QBrush(Qt.GlobalColor.black))
+    p.drawEllipse(center, r + size * 0.08, r + size * 0.08)
+    p.restore()
+    if state == IconState.ERROR:
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(fill)
+        p.drawEllipse(center, r, r)
+    elif state == IconState.LOGIN:
+        w = max(1.5, size * 0.09)
+        p.setPen(QPen(fill, w))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawEllipse(center, r - w / 2, r - w / 2)
+    elif state == IconState.PAUSED:
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(fill)
+        bw, bh = r * 0.62, r * 1.9
+        p.drawRoundedRect(QRectF(center.x() - r * 0.85, center.y() - bh / 2, bw, bh), bw / 3, bw / 3)
+        p.drawRoundedRect(QRectF(center.x() + r * 0.23, center.y() - bh / 2, bw, bh), bw / 3, bw / 3)
+
+
+def _render(size: int, state: IconState, frame: int, template: bool, dark: bool, animate: bool) -> QPixmap:
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+    if template:
+        dot = arrow = QColor(Qt.GlobalColor.black)
+    elif dark:
+        dot, arrow = QColor(BLAU_HELL), QColor(WEISS)
+    else:
+        dot, arrow = QColor(BLAU), QColor(INK)
+
+    pose = (0.0, 1.0, 0.0)
+    if state == IconState.SYNCING:
+        pose = sync_pose(frame) if animate else STATIC_SYNC_POSE
+
+    badge = state in (IconState.ERROR, IconState.LOGIN, IconState.PAUSED)
+    scale = size * 0.94 / 72
+    x = (size - 48 * scale) / 2 - (size * 0.1 if badge else 0)
+    p.save()
+    p.translate(x, size * 0.03)
+    p.scale(scale, scale)
+    _draw_glyph(p, dot, arrow, pose)
+    p.restore()
+
+    if badge:
+        if template:
+            fill = QColor(Qt.GlobalColor.black)
+        else:
+            fill = {IconState.ERROR: FARBE_FEHLER, IconState.LOGIN: FARBE_LOGIN, IconState.PAUSED: FARBE_PAUSE}[state]
+        _draw_badge(p, size, state, fill)
+    p.end()
+    return pm
+
+
+@lru_cache(maxsize=None)
+def _tray_icon_cached(state: IconState, frame: int, template: bool, dark: bool, animate: bool) -> QIcon:
     icon = QIcon()
     for size in _SIZES:
-        icon.addPixmap(_render(size, state, frame, template, dark))
+        icon.addPixmap(_render(size, state, frame, template, dark, animate))
     if template:
         icon.setIsMask(True)
     return icon
 
 
-def app_icon() -> QIcon:
-    """Farbiges App Icon für Fenster und Dialoge."""
-    icon = QIcon()
-    for size in (16, 32, 48, 64, 128, 256):
-        pm = QPixmap(size, size)
-        pm.fill(Qt.GlobalColor.transparent)
-        p = QPainter(pm)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.scale(size / 64, size / 64)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(UNI_BLAU)
-        p.drawRoundedRect(QRectF(2, 2, 60, 60), 14, 14)
-        p.translate(10, 9)
-        p.scale(44 / 64, 44 / 64)
-        _draw_glyph(p, QColor(Qt.GlobalColor.white))
-        p.end()
-        icon.addPixmap(pm)
-    return icon
-
-
-def status_pixmap(state: IconState, size: int = 20) -> QPixmap:
-    """Farbiges Status Symbol für das Fenster (unabhängig von der Plattform)."""
-    return _render(size, state, 0, False, is_dark_mode())
+def tray_icon(state: IconState, frame: int = 0, dark: bool | None = None, animate: bool = True) -> QIcon:
+    """Icon für Tray bzw. Menüleiste im Stil der Plattform. Bilder werden zwischengespeichert,
+    damit die Animation keine Dauerlast erzeugt."""
+    if dark is None:
+        dark = is_dark_mode()
+    return _tray_icon_cached(state, frame % SYNC_FRAMES, IS_MAC, dark, animate)
 
 
 # ---------------- Navigation und Status (modernes Layout) ----------------

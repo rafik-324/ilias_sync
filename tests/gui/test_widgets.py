@@ -310,3 +310,198 @@ def test_wizard_schlaegt_keinen_vorhandenen_ordner_vor(qtbot, fake_first_run):
     qtbot.addWidget(page)
     page.initializePage()
     assert page.path.text() == ""
+
+
+# ---------------- Vorschau ----------------
+
+def test_vorschau_zeigt_fortschritt_auch_ohne_knopf(qtbot, tmp_path):
+    c = Controller(FakeApi(delay=0.02, workdir=tmp_path / "w"))
+    w = MainWindow(c)
+    qtbot.addWidget(w)
+    with qtbot.waitSignal(c.dry_run_finished, timeout=10_000):
+        assert c.start_dry_run()
+        assert not w.preview.progress.isHidden()
+        assert w.status_label.text() == "Vorschau läuft"
+    assert w.preview.progress.isHidden()
+    assert w.preview.tree.actions
+
+
+def test_vorschau_login_noetig_wird_angezeigt(qtbot, tmp_path):
+    from ilias_sync.api import InvalidCredentialsError
+
+    class OhneLogin(FakeApi):
+        def dry_run(self, progress, cancel):
+            raise InvalidCredentialsError("Anmeldung bei ILIAS nötig.")
+
+    c = Controller(OhneLogin(delay=0.0, workdir=tmp_path / "w"))
+    w = MainWindow(c)
+    qtbot.addWidget(w)
+    with qtbot.waitSignal(c.login_required, timeout=10_000):
+        w.preview.btn_preview.click()
+    assert c.login_needed
+    assert w.preview.error.text() == "Anmeldung bei ILIAS nötig."
+    assert w.preview.progress.isHidden()
+
+
+# ---------------- Mausrad, Spalten ----------------
+
+def _wheel(widget):
+    from PySide6.QtCore import QPoint, QPointF, Qt as _Qt
+    from PySide6.QtGui import QWheelEvent
+    pos = QPointF(widget.rect().center())
+    return QWheelEvent(pos, QPointF(widget.mapToGlobal(pos.toPoint())), QPoint(0, 0), QPoint(0, -120),
+                       _Qt.MouseButton.NoButton, _Qt.KeyboardModifier.NoModifier, _Qt.ScrollPhase.NoScrollPhase, False)
+
+
+def test_mausrad_aendert_auswahl_nicht(qtbot):
+    from PySide6.QtCore import Qt as _Qt
+    from PySide6.QtWidgets import QApplication
+    from ilias_sync.gui.widgets import ComboBox, SpinBox
+    combo = ComboBox()
+    qtbot.addWidget(combo)
+    combo.addItems(["a", "b", "c"])
+    spin = SpinBox()
+    qtbot.addWidget(spin)
+    spin.setRange(0, 10)
+    spin.setValue(5)
+    for w in (combo, spin):
+        ev = _wheel(w)
+        QApplication.sendEvent(w, ev)
+        assert not ev.isAccepted()   # geht an den scrollbaren Bereich weiter
+    assert combo.currentIndex() == 0
+    assert spin.value() == 5
+    assert combo.focusPolicy() == _Qt.FocusPolicy.StrongFocus
+
+
+def test_kurse_ordner_dropdowns_ohne_mausrad(qtbot, fake):
+    from PySide6.QtWidgets import QComboBox
+    from ilias_sync.gui.widgets import ComboBox
+    w = MainWindow(Controller(fake))
+    qtbot.addWidget(w)
+    combos = w.courses.table.findChildren(QComboBox)
+    assert combos and all(isinstance(c, ComboBox) for c in combos)
+    assert w.settings.interval.__class__.__name__ == "SpinBox"
+
+
+def test_semester_spalte_nur_bei_mehreren_semestern(qtbot, fake):
+    from ilias_sync.gui.tab_courses import COL_SEM
+    w = MainWindow(Controller(fake))
+    qtbot.addWidget(w)
+    # Fake Config: nur HWS 2025
+    assert w.courses.table.isColumnHidden(COL_SEM)
+    assert "Semester HWS 2025" in w.courses.table.item(0, 0).toolTip()
+
+
+# ---------------- Abnahme: Wizard, Beenden, zweiter Start ----------------
+
+def test_wizard_kompletter_durchlauf_mit_fehlerfaellen(qtbot, fake_first_run, monkeypatch):
+    api = fake_first_run
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    wiz = SetupWizard(api)
+    qtbot.addWidget(wiz)
+    wiz.show()
+
+    # 1. Login: erst falsches Passwort, dann richtig
+    page = wiz.currentPage()
+    page.form.user.setText("musterstudi")
+    page.form.password.setText("falsch")
+    page.form.submit()
+    qtbot.waitUntil(lambda: "falsch" in page.form.status.text(), timeout=5000)
+    page.form.password.setText("geheim")
+    page.form.submit()
+    qtbot.waitUntil(page.isComplete, timeout=5000)
+    wiz.next()
+
+    # 2. Basisordner: noch nicht vorhanden, wird nach Rückfrage angelegt
+    page = wiz.currentPage()
+    base = api.workdir / "Uni"
+    page.path.setText(str(base))
+    page._run_check()
+    assert page.isComplete()
+    wiz.next()
+    assert (base / "01_Universität_Mannheim").is_dir()
+
+    # 3. Kurse: zuerst offline, dann Erneut versuchen
+    page = wiz.currentPage()
+    api.fail.add("offline")
+    page._load()
+    qtbot.waitUntil(lambda: not page.retry.isHidden(), timeout=5000)
+    assert "nicht erreichbar" in page.error.text()
+    api.fail.discard("offline")
+    page.retry.click()
+    qtbot.waitUntil(page.isComplete, timeout=10_000)
+    assert page.table.rowCount() == 7
+    wiz.next()
+
+    # 4. Vorschau
+    page = wiz.currentPage()
+    qtbot.waitUntil(page.isComplete, timeout=10_000)
+    assert page.tree.actions
+    wiz.next()
+
+    # 5. Fertig: Config enthält Basisordner, Uni-ID und Kurszuordnungen
+    wiz.accept()
+    cfg = api.load_config()
+    assert cfg.base_dir == base
+    assert cfg.username == "musterstudi"
+    assert {c.ref_id for c in cfg.courses} >= {1001, 1002, 1007}
+
+
+def test_beenden_waehrend_sync_bricht_sauber_ab(qtbot, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QApplication
+    from ilias_sync.gui.app import GuiApp
+    api = FakeApi(delay=0.05, workdir=tmp_path / "w")
+    g = GuiApp(api)
+    quit_called = []
+    monkeypatch.setattr(QApplication, "quit", lambda: quit_called.append(True))
+    asked = []
+
+    def frage(*a, **k):
+        asked.append(a[2] if len(a) > 2 else "")
+        return QMessageBox.StandardButton.No if len(asked) == 1 else QMessageBox.StandardButton.Yes
+    monkeypatch.setattr(QMessageBox, "question", frage)
+
+    assert g.controller.start_sync()
+    g.quit()                       # erste Rückfrage: Nein, App läuft weiter
+    assert not quit_called and g.controller.busy
+    import time
+    t0 = time.monotonic()
+    g.quit()                       # zweite Rückfrage: Ja
+    assert time.monotonic() - t0 < 2, "Beenden hing am Warten auf den Worker Thread"
+    assert quit_called
+    assert not g.controller._task or not g.controller._task.is_running()
+    assert "abgebrochen" in asked[0]
+    g.tray.hide()
+
+
+def test_zweiter_start_weckt_erste_instanz(qtbot, monkeypatch):
+    import uuid
+    from ilias_sync.gui import app as gui_app
+    # eigener Name, damit eine echte laufende App nicht geweckt wird
+    monkeypatch.setattr(gui_app, "_server_name", lambda: f"ilias-sync-test-{uuid.uuid4().hex}")
+    woken = []
+    first = gui_app.SingleInstance(lambda: woken.append(True))
+    assert not first.already_running()
+    first.listen()
+    second = gui_app.SingleInstance(lambda: None)
+    second.name = first.name
+    assert second.already_running()
+    qtbot.waitUntil(lambda: bool(woken), timeout=3000)
+    first.server.close()
+
+
+# ---------------- Logo und Icons ----------------
+
+def test_logo_assets_vorhanden_und_ladbar(qtbot):
+    from ilias_sync.gui import icons
+    for name in icons.ASSET_FILES:
+        assert icons.asset_path(name).is_file(), name
+    assert not icons.app_icon().isNull() and not icons.app_icon(dark=True).isNull()
+    assert not icons.brand_pixmap(30, dark=False).isNull()
+    assert not icons.brand_pixmap(30, dark=True).isNull()
+    for state in IconState:
+        for frame in range(icons.SYNC_FRAMES):
+            assert not icons.tray_icon(state, frame, dark=False).isNull()
+    assert not icons.tray_icon(IconState.SYNCING, animate=False).isNull()
+    # Animation kehrt nach einem Zyklus in die Ruhelage zurück
+    assert icons.sync_pose(0) == (0.0, 1.0, 0.0)

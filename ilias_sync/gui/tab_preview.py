@@ -40,16 +40,18 @@ class PreviewTab(Page):
         self.c.dry_run_finished.connect(self._done)
         self.c.dry_run_failed.connect(self._failed)
         self.c.progress.connect(self._progress)
-        self.c.busy_changed.connect(self._update_buttons)
+        self.c.busy_changed.connect(self._on_busy)
         self.c.sync_finished.connect(lambda *_: self._invalidate())
         self._update_buttons()
 
     def _start(self) -> None:
+        self.c.start_dry_run()   # Anzeige folgt über busy_changed
+
+    def _begin(self) -> None:
         show_error(self.error, None)
-        if self.c.start_dry_run():
-            self._waiting = True
-            self.tree.clear()
-            self.progress.start("Vorschau wird erstellt ...")
+        self._waiting = True
+        self.tree.clear()
+        self.progress.start("Vorschau wird erstellt ...")
 
     def _progress(self, p) -> None:
         if self._waiting:
@@ -77,6 +79,12 @@ class PreviewTab(Page):
     def _sync(self) -> None:
         if self.c.start_sync():
             self.btn_sync.setEnabled(False)
+
+    def _on_busy(self, busy: bool) -> None:
+        # Fortschritt auch zeigen, wenn die Vorschau anderswo gestartet wurde
+        if busy and self.c.previewing and not self._waiting:
+            self._begin()
+        self._update_buttons()
 
     def _update_buttons(self, *_args) -> None:
         self.btn_preview.setEnabled(self.c.can_sync())

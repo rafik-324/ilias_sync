@@ -131,6 +131,10 @@ class Controller(QObject):
     def syncing(self) -> bool:
         return self._task_kind == "sync"
 
+    @property
+    def previewing(self) -> bool:
+        return self._task_kind == "dry_run"
+
     def icon_state(self) -> IconState:
         if self.busy:
             return IconState.SYNCING
@@ -233,6 +237,8 @@ class Controller(QObject):
                 self.dry_run_failed.emit("Vorschau abgebrochen.")
         elif isinstance(e, InvalidCredentialsError):
             self.login_needed = True
+            if kind == "dry_run":
+                self.dry_run_failed.emit(text)
             self.login_required.emit()
         elif isinstance(e, NetworkError):
             self.offline = True
