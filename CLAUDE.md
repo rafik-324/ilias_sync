@@ -50,6 +50,10 @@ Das Repo liegt in OneDrive und wird auf beiden Rechnern genutzt. Zuerst per `una
 * Commit E-Mail im Repo: `215122369+rafik-324@users.noreply.github.com` (GitHub blockiert Pushes mit der privaten Adresse)
 * Nach getesteten Schritten selbst committen, pushen nur nach Rückfrage
 * Keine Historie umschreiben, solange ein anderer Agent im Repo arbeitet
+* **Zwischen Windows und macOS nur über GitHub abgleichen, nie auf OneDrive verlassen.** OneDrive synchronisiert den `.git` Ordner nicht zuverlässig (am 2026-09-26 fehlten auf dem Mac 8 Commits vom Windows Rechner, Meilenstein 3 wurde doppelt gebaut). Daher:
+  * Zu Beginn jeder Sitzung `git fetch origin` und prüfen, ob `origin/main` bzw. `origin/gui` neuer ist. Wenn ja, erst übernehmen (`git merge origin/<branch>`), dann arbeiten
+  * Am Ende einer Arbeitsphase auf einem Rechner pushen (nach Rückfrage beim Nutzer), damit der andere Rechner den Stand bekommt
+  * Beim Wechsel des Rechners zuerst in beiden Ordnern (`main` und `gui`) pullen
 
 ### Python Umgebung
 
