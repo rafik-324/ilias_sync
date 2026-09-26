@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QBrush, QColor
+from PySide6.QtCore import QRectF, Qt, QVariantAnimation, Signal
+from PySide6.QtGui import QBrush, QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -215,6 +215,77 @@ class Page(QWidget):
 
 # ---------------- Fortschritt ----------------
 
+class Spinner(QWidget):
+    """Flüssiger Lade Kreis: Bogen, der sich stufenlos dreht (QVariantAnimation im Takt der
+    Qt Animationen, etwa 60 Bilder pro Sekunde). Läuft nur, solange er sichtbar ist, und
+    zeichnet in den Farben des aktuellen Themes."""
+
+    PERIOD_MS = 900
+
+    def __init__(self, size: int = 16, background: bool = False, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setFixedSize(size, size)
+        self._background = background
+        self._angle = 0.0
+        self._wanted = False
+        self._anim = QVariantAnimation(self)
+        self._anim.setStartValue(0.0)
+        self._anim.setEndValue(360.0)
+        self._anim.setDuration(self.PERIOD_MS)
+        self._anim.setLoopCount(-1)
+        self._anim.valueChanged.connect(self._on_value)
+
+    def start(self) -> None:
+        self._wanted = True
+        if self.isVisible() and not self.is_running():
+            self._anim.start()
+
+    def stop(self) -> None:
+        self._wanted = False
+        self._anim.stop()
+        self._angle = 0.0
+        self.update()
+
+    def is_running(self) -> bool:
+        return self._anim.state() == QVariantAnimation.State.Running
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        if self._wanted and not self.is_running():
+            self._anim.start()
+
+    def hideEvent(self, event) -> None:  # noqa: N802
+        # versteckt keine Last erzeugen, beim nächsten Anzeigen geht es weiter
+        self._anim.stop()
+        super().hideEvent(event)
+
+    def _on_value(self, value) -> None:
+        self._angle = float(value)
+        self.update()
+
+    def paintEvent(self, _event) -> None:  # noqa: N802
+        t = theme.tokens()
+        size = self.width()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self._background:
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(t.accent_soft))
+            p.drawEllipse(QRectF(0, 0, size, size))
+        width = max(1.6, size / (12 if self._background else 8))
+        inset = size * (0.26 if self._background else 0.0) + width / 2 + 0.5
+        rect = QRectF(inset, inset, size - 2 * inset, size - 2 * inset)
+        track = QColor(t.accent)
+        track.setAlphaF(0.18)
+        p.setPen(QPen(track, width))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawEllipse(rect)
+        p.setPen(QPen(QColor(t.accent), width, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        # Qt misst Winkel gegen den Uhrzeigersinn in 1/16 Grad, daher negativ für Drehung im Uhrzeigersinn
+        p.drawArc(rect, int((90 - self._angle) * 16), int(-100 * 16))
+        p.end()
+
+
 class ProgressPanel(QWidget):
     """Fortschrittsbalken mit Phase und Detail, optional mit Abbrechen."""
 
@@ -229,7 +300,10 @@ class ProgressPanel(QWidget):
         self.cancel_btn.clicked.connect(self._cancel)
         self.cancel_btn.setVisible(with_cancel)
 
+        self.spinner = Spinner(14)
         row = QHBoxLayout()
+        row.setSpacing(8)
+        row.addWidget(self.spinner, 0, Qt.AlignmentFlag.AlignVCenter)
         row.addWidget(self.label, 1)
         row.addWidget(self.cancel_btn)
         lay = QVBoxLayout(self)
@@ -244,6 +318,7 @@ class ProgressPanel(QWidget):
         self.label.setText(text)
         self.cancel_btn.setEnabled(True)
         self.show()
+        self.spinner.start()
 
     def update_progress(self, p: Progress) -> None:
         self.bar.setRange(0, p.total or 0)   # ohne Gesamtzahl unbestimmter Balken
@@ -252,6 +327,7 @@ class ProgressPanel(QWidget):
         self.label.setText(logic.progress_text(p))
 
     def stop(self) -> None:
+        self.spinner.stop()
         self.hide()
 
     def _cancel(self) -> None:

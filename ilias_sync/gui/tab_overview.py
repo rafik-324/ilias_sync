@@ -25,9 +25,9 @@ from PySide6.QtWidgets import (
 from ilias_sync.api import ChangedFile, DownloadedFile, IliasSyncError, ItemStatus, NetworkError
 from ilias_sync.gui import logic, theme
 from ilias_sync.gui.controller import Controller, error_text
-from ilias_sync.gui.icons import SYNC_FRAMES, IconState, status_badge
+from ilias_sync.gui.icons import IconState, status_badge
 from ilias_sync.gui.tray import open_path
-from ilias_sync.gui.widgets import Card, ElideDelegate, ErrorListDialog, Page, ProgressPanel, button, error_label, hint_label, role_label, show_error
+from ilias_sync.gui.widgets import Card, ElideDelegate, ErrorListDialog, Page, Spinner, ProgressPanel, button, error_label, hint_label, role_label, show_error
 from ilias_sync.gui.worker import run_task
 
 log = logging.getLogger(__name__)
@@ -118,7 +118,6 @@ class OverviewTab(Page):
         self._files: list[DownloadedFile] = []
         self._removed: list[DownloadedFile] = []
         self._changed: list[ChangedFile] = []
-        self._frame = 0
 
         self.btn_folder = button("Uni Ordner öffnen")
         self.btn_folder.clicked.connect(self._open_root)
@@ -131,6 +130,10 @@ class OverviewTab(Page):
         self.badge = QLabel()
         self.badge.setFixedSize(48, 48)
         top.addWidget(self.badge, 0, Qt.AlignmentFlag.AlignTop)
+        # während eines Syncs statt des Symbols ein flüssiger Lade Kreis
+        self.spinner = Spinner(48, background=True)
+        self.spinner.hide()
+        top.addWidget(self.spinner, 0, Qt.AlignmentFlag.AlignTop)
         texts = QVBoxLayout()
         texts.setSpacing(3)
         self.status_text = role_label("", "hero")
@@ -272,9 +275,6 @@ class OverviewTab(Page):
         self._clock.timeout.connect(self.refresh_status)
         self._clock.start()
         # Animation des Status Symbols während eines Syncs
-        self._spin = QTimer(self)
-        self._spin.setInterval(120)
-        self._spin.timeout.connect(self._next_frame)
 
         self.refresh_status()
         self.reload_files()
@@ -296,12 +296,15 @@ class OverviewTab(Page):
 
     def _draw_badge(self) -> None:
         state = self.c.icon_state()
+        syncing = state == IconState.SYNCING
+        self.badge.setVisible(not syncing)
+        self.spinner.setVisible(syncing)
+        if syncing:
+            self.spinner.start()
+            return
+        self.spinner.stop()
         fg, bg = self._badge_colors(state)
-        self.badge.setPixmap(status_badge(state, fg, bg, 48, self._frame))
-
-    def _next_frame(self) -> None:
-        self._frame = (self._frame + 1) % (SYNC_FRAMES * 2)
-        self._draw_badge()
+        self.badge.setPixmap(status_badge(state, fg, bg, 48))
 
     def refresh_status(self) -> None:
         c = self.c
@@ -442,11 +445,8 @@ class OverviewTab(Page):
     def _on_busy(self, busy: bool) -> None:
         if busy and self.c.syncing:
             self.progress.start("Synchronisierung startet ...")
-            self._spin.start()
         else:
             self.progress.stop()
-            self._spin.stop()
-            self._frame = 0
         self.refresh_status()
 
     # ---------------- Aktionen ----------------

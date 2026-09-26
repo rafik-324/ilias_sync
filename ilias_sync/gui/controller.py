@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QTimer, Signal
 
 from ilias_sync.api import (
     Cancelled,
@@ -33,6 +33,7 @@ from ilias_sync.gui.worker import Task, run_task
 log = logging.getLogger(__name__)
 
 UNERWARTET = "Unerwarteter Fehler, Details im Log."
+PROGRESS_INTERVAL_MS = 100   # höchstens 10 Fortschritts Updates pro Sekunde an die Anzeige
 
 
 def error_text(e: Exception) -> str:
@@ -70,6 +71,11 @@ class Controller(QObject):
         # fragen ihn bei jedem Fortschritt ab, das soll keine Datenbankabfrage sein
         self.last_run: SyncRun | None = None
         self._task: Task | None = None
+        self._pending_progress: Progress | None = None
+        self._progress_timer = QTimer(self)
+        self._progress_timer.setSingleShot(True)
+        self._progress_timer.setInterval(PROGRESS_INTERVAL_MS)
+        self._progress_timer.timeout.connect(self._flush_progress)
         self._task_kind: str | None = None   # "sync" oder "dry_run"
         self.reload_config()
 
@@ -205,15 +211,28 @@ class Controller(QObject):
             self._task.cancel()
 
     def _finish_task(self) -> None:
+        self._progress_timer.stop()
+        self._pending_progress = None
         self._task = None
         self._task_kind = None
         self.last_progress = None
         self.busy_changed.emit(False)
 
     def _on_progress(self, p: Progress) -> None:
+        # Drosseln: erster Stand sofort, danach höchstens alle 100 ms der jeweils letzte
         self.last_progress = p
+        self._pending_progress = p
+        if not self._progress_timer.isActive():
+            self._flush_progress()
+            self._progress_timer.start()
+
+    def _flush_progress(self) -> None:
+        p, self._pending_progress = self._pending_progress, None
+        if p is None:
+            return
         self.progress.emit(p)
         self.state_changed.emit()
+        self._progress_timer.start()
 
     def _on_done(self, kind: str, result, automatic: bool) -> None:
         self._finish_task()

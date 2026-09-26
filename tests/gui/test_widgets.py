@@ -729,3 +729,59 @@ def test_neuer_kursordner_nutzt_vorschlag_des_backends(qtbot, fake, monkeypatch)
         raise RuntimeError("Dateisystem nicht lesbar")
     monkeypatch.setattr(fake, "suggest_mapping", kaputt)
     assert w.courses._new_dir_suggestion(course, ["01_x"]) == "02_mathematik_vorkurs"
+
+
+# ---------------- Spinner und Drosselung ----------------
+
+def test_spinner_laeuft_nur_sichtbar(qtbot):
+    from ilias_sync.gui.widgets import Spinner
+    s = Spinner(24)
+    qtbot.addWidget(s)
+    s.start()
+    assert not s.is_running()          # noch nicht sichtbar
+    s.show()
+    qtbot.waitUntil(s.is_running, timeout=1000)
+    angle = s._angle
+    qtbot.wait(120)
+    assert s._angle != angle           # dreht sich stufenlos weiter
+    s.hide()
+    assert not s.is_running()          # versteckt keine Last
+    s.show()
+    qtbot.waitUntil(s.is_running, timeout=1000)
+    s.stop()
+    assert not s.is_running()
+    s.hide()
+    s.show()
+    assert not s.is_running()          # gestoppt bleibt gestoppt
+
+
+def test_spinner_folgt_sync_in_der_uebersicht(qtbot, tmp_path):
+    c = Controller(FakeApi(delay=0.02, workdir=tmp_path / "w"))
+    w = MainWindow(c)
+    qtbot.addWidget(w)
+    w.show()
+    ov = w.overview
+    assert ov.spinner.isHidden() and not ov.spinner.is_running()
+    with qtbot.waitSignal(c.sync_finished, timeout=10_000):
+        c.start_sync()
+        assert not ov.spinner.isHidden() and ov.badge.isHidden()
+        qtbot.waitUntil(ov.spinner.is_running, timeout=1000)
+        assert ov.progress.spinner.is_running()
+    assert ov.spinner.isHidden() and not ov.spinner.is_running()
+    assert not ov.progress.spinner.is_running()
+    assert not ov.badge.isHidden()
+
+
+def test_fortschritt_wird_gedrosselt(qtbot, fake):
+    from ilias_sync.api import Progress
+    c = Controller(fake)
+    got = []
+    c.progress.connect(got.append)
+    for i in range(1, 51):
+        c._on_progress(Progress("Durchsuchen", i, None, "ILIAS Seiten gelesen"))
+    assert [p.current for p in got] == [1]          # erster Stand sofort
+    qtbot.waitUntil(lambda: len(got) == 2, timeout=1000)
+    assert got[-1].current == 50                     # danach nur der letzte Stand
+    qtbot.wait(250)
+    assert len(got) == 2                             # nichts Neues, keine weiteren Signale
+    assert c.last_progress.current == 50

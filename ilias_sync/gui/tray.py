@@ -54,6 +54,7 @@ class Tray(QObject):
 
         self._anim = QTimer(self)
         self._anim.setInterval(SYNC_FRAME_MS)
+        self._anim.setTimerType(Qt.TimerType.PreciseTimer)   # gleichmäßige Bildabstände
         self._anim.timeout.connect(self._next_frame)
 
         self._build_menu()
