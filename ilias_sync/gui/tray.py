@@ -21,6 +21,7 @@ IS_MAC = sys.platform == "darwin"
 
 # Ziele für Klicks auf Benachrichtigungen
 ZIEL_UEBERSICHT = "overview"
+ZIEL_GEAENDERT = "changed"      # Übersicht, Bereich "In ILIAS geändert"
 ZIEL_KURSE = "courses"
 ZIEL_LOG = "log"
 ZIEL_LOGIN = "login"
@@ -59,8 +60,12 @@ class Tray(QObject):
         controller.sync_finished.connect(self._on_sync_finished)
         controller.error.connect(self._on_error)
         controller.login_required.connect(self._on_login_required)
+        # Anzahl nur bei neuen Daten abfragen, nicht bei jedem Fortschrittsschritt
+        controller.files_changed.connect(self.refresh_changed)
+        controller.config_changed.connect(self.refresh_changed)
         QGuiApplication.styleHints().colorSchemeChanged.connect(lambda *_: self.refresh())
         self.refresh()
+        self.refresh_changed()
 
     # ---------------- Menü ----------------
 
@@ -77,6 +82,11 @@ class Tray(QObject):
         self.menu_new = QMenu("Neue Dateien", m)
         self.menu_new.aboutToShow.connect(self._fill_new_files)
         m.addMenu(self.menu_new)
+
+        self.act_changed = QAction("", m)
+        self.act_changed.triggered.connect(lambda: self.open_window.emit(ZIEL_GEAENDERT))
+        self.act_changed.setVisible(False)
+        m.addAction(self.act_changed)
 
         m.addSeparator()
         act_folder = QAction("Uni Ordner öffnen", m)
@@ -152,6 +162,11 @@ class Tray(QObject):
             files = "neue Datei" if n == 1 else "neue Dateien"
             self.act_last.setText(f"Letzter Sync: {when} ({n} {files})")
 
+    def refresh_changed(self) -> None:
+        n = self.controller.changed_count()
+        self.act_changed.setText(logic.changed_count_text(n))
+        self.act_changed.setVisible(n > 0)
+
     def _next_frame(self) -> None:
         self._frame = (self._frame + 1) % SYNC_FRAMES
         self.icon.setIcon(tray_icon(IconState.SYNCING, self._frame))
@@ -202,9 +217,9 @@ class Tray(QObject):
         target = ZIEL_UEBERSICHT
         if text := logic.bundle_new_files(result.new_files):
             lines.append(text)
-        if result.run.updated:
-            n = result.run.updated
-            lines.append(f"{n} {'Datei' if n == 1 else 'Dateien'} aktualisiert")
+        if text := logic.bundle_changed_files(result.changed_files):
+            lines.append(text)
+            target = ZIEL_GEAENDERT
         if text := logic.unassigned_course_text([c.name for c in result.new_unassigned_courses]):
             lines.append(text)
             target = ZIEL_KURSE

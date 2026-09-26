@@ -40,8 +40,7 @@ class ItemStatus(Enum):
 
 class ActionKind(Enum):
     NEW = "new"                    # neue Datei
-    # CHANGED = "changed" (in ILIAS geändert, nur gemeldet) laut GUI_KONTEXT.md trägt der GUI Agent
-    # zusammen mit den Texten in gui/widgets.py und gui/logic.py ein
+    CHANGED = "changed"            # in ILIAS geändert: wird nur gemeldet, nicht geladen
     UPDATE = "update"              # veraltet, wird vom Backend nicht mehr erzeugt
     CONFLICT = "conflict"          # veraltet, wird vom Backend nicht mehr erzeugt
     SKIP_REMOVED = "skip_removed"  # vom Nutzer entfernt, wird nicht geladen

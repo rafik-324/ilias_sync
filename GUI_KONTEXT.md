@@ -53,18 +53,6 @@ Das ist der Vertrag zwischen GUI und Backend. Der GUI Agent legt ihn **nicht** s
 
 Alle Methoden sind synchron und Qt frei. Langlaufende Methoden nehmen einen `progress` Callback und ein `cancel` Token (`threading.Event`) entgegen. Der Worker übersetzt Callbacks in Qt Signale.
 
-### 3.0 Offene Vertragsänderung für den GUI Agenten (2026-09-26)
-
-Vorgabe des Nutzers: In ILIAS **geänderte** Dateien werden nie automatisch geladen (kein `_alt_` mehr). Die App meldet sie, der Nutzer lädt sie per Klick selbst (neue Version kommt als `<name>_ilias_<Datum>` daneben, die vorhandene Datei bleibt unverändert) oder ignoriert die Änderung. Ganz neue Dateien werden weiter automatisch geladen.
-
-Umzusetzen in der GUI:
-* `ActionKind.CHANGED` in `api.py` eintragen (vom Backend bewusst noch nicht gesetzt, weil `gui/widgets.py` sonst ohne Text für diesen Wert abbricht) und Texte in `widgets.py`/`logic.py` ergänzen: Name "In ILIAS geändert", Erklärung "Neue Version in ILIAS. Wird nicht automatisch geladen, du entscheidest in der Übersicht". `UPDATE` und `CONFLICT` erzeugt das Backend nicht mehr
-* Neu: `ItemStatus.ILIAS_CHANGED`, Datentyp `ChangedFile`, Feld `SyncResult.changed_files`, Methoden `changed_items()`, `download_changed(ref_id)`, `dismiss_changed(ref_id)` (alle unten in 3.1 und 3.2)
-* Übersicht: Bereich "In ILIAS geändert" (6.1), Tray Menü Eintrag mit Anzahl (5), Benachrichtigung (5)
-* `fake_backend.py`: ein paar geänderte Dateien simulieren, `download_changed`/`dismiss_changed` nachbilden
-
-Diesen Abschnitt nach der Umsetzung löschen.
-
 ### 3.1 Datentypen
 
 ```python

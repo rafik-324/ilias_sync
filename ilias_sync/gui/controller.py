@@ -50,7 +50,7 @@ class Controller(QObject):
     error = Signal(str, bool)              # Text, automatisch ausgelöst
     login_required = Signal()
     config_changed = Signal()
-    files_changed = Signal()               # recent_files / removed_items neu laden
+    files_changed = Signal()               # recent_files / removed_items / changed_items neu laden
 
     def __init__(self, api, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -258,6 +258,20 @@ class Controller(QObject):
 
     def redownloaded(self) -> None:
         self.files_changed.emit()
+
+    def changed_handled(self) -> None:
+        """Nach Herunterladen oder Ignorieren einer in ILIAS geänderten Datei."""
+        self.files_changed.emit()
+
+    def changed_count(self) -> int:
+        """Anzahl der in ILIAS geänderten, noch nicht behandelten Dateien."""
+        if self.config is None:
+            return 0
+        try:
+            return len(self.api.changed_items())
+        except Exception:  # noqa: BLE001, Anzeige darf nie abstürzen
+            log.exception("Geänderte Dateien konnten nicht gelesen werden")
+            return 0
 
     # ---------------- Beenden ----------------
 

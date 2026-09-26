@@ -1,4 +1,4 @@
-"""Seite Übersicht: Status, Kennzahlen des letzten Syncs, zuletzt geladene Dateien."""
+"""Seite Übersicht: Status, Kennzahlen, in ILIAS geänderte Dateien, zuletzt geladene Dateien."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ilias_sync.api import DownloadedFile, ItemStatus
+from ilias_sync.api import ChangedFile, DownloadedFile, IliasSyncError, ItemStatus, NetworkError
 from ilias_sync.gui import logic, theme
 from ilias_sync.gui.controller import Controller, error_text
 from ilias_sync.gui.icons import SYNC_FRAMES, IconState, status_badge
@@ -38,7 +38,11 @@ STATUS_TEXT = {
     ItemStatus.USER_MODIFIED: "Von dir geändert",
     ItemStatus.USER_REMOVED: "Entfernt",
     ItemStatus.ERROR: "Fehler",
+    ItemStatus.ILIAS_CHANGED: "In ILIAS geändert",
 }
+
+CHANGED_ROW = 44
+CHANGED_VISIBLE_ROWS = 2   # weitere per Scrollen, damit die Dateiliste Platz behält
 
 HERO_TEXT = {
     IconState.READY: "Alles aktuell",
@@ -67,6 +71,32 @@ def list_table(headers: list[str]) -> QTableWidget:
     return t
 
 
+def download_all_changed(api, ref_ids: list[int]) -> list[str]:
+    """Lädt alle neuen Versionen nacheinander (im Worker). Liefert Fehlertexte einzelner Dateien.
+
+    Bei Netzwerkfehlern wird abgebrochen, die übrigen würden ebenfalls scheitern.
+    """
+    failed: list[str] = []
+    for ref_id in ref_ids:
+        try:
+            api.download_changed(ref_id)
+        except NetworkError:
+            raise
+        except IliasSyncError as e:
+            failed.append(str(e))
+    return failed
+
+
+def _cell_widget(*widgets: QWidget) -> QWidget:
+    cell = QWidget()
+    cl = QHBoxLayout(cell)
+    cl.setContentsMargins(4, 4, 4, 4)
+    cl.setSpacing(6)
+    for w in widgets:
+        cl.addWidget(w)
+    return cell
+
+
 class StatTile(Card):
     def __init__(self, label: str) -> None:
         super().__init__(margins=14, spacing=0)
@@ -85,6 +115,7 @@ class OverviewTab(Page):
         self.c = controller
         self._files: list[DownloadedFile] = []
         self._removed: list[DownloadedFile] = []
+        self._changed: list[ChangedFile] = []
         self._frame = 0
 
         self.btn_folder = button("Uni Ordner öffnen")
@@ -128,11 +159,41 @@ class OverviewTab(Page):
         stats = QHBoxLayout()
         stats.setSpacing(14)
         self.stat_new = StatTile("Neu beim letzten Sync")
-        self.stat_updated = StatTile("Aktualisiert")
+        self.stat_changed = StatTile("In ILIAS geändert")
         self.stat_errors = StatTile("Fehler")
-        for tile in (self.stat_new, self.stat_updated, self.stat_errors):
+        for tile in (self.stat_new, self.stat_changed, self.stat_errors):
             stats.addWidget(tile)
         self.body.addLayout(stats)
+
+        # In ILIAS geändert: wird nie automatisch geladen, der Nutzer entscheidet
+        self.changed_card = Card(margins=0, spacing=0)
+        chead = QHBoxLayout()
+        chead.setContentsMargins(18, 10, 18, 0)
+        self.changed_title = role_label("", "section")
+        chead.addWidget(self.changed_title)
+        chead.addStretch(1)
+        self.btn_all_changed = button("Alle herunterladen")
+        self.btn_all_changed.clicked.connect(self._download_all_changed)
+        chead.addWidget(self.btn_all_changed)
+        self.changed_card.lay.addLayout(chead)
+        changed_hint = hint_label(
+            "Wird nicht automatisch geladen. Die neue Version kommt als <i>name_ilias_Datum</i> neben deine Datei."
+        )
+        changed_hint.setToolTip("Die vorhandene Datei bleibt unverändert. Ignorieren blendet den Eintrag aus, "
+                                "bis sich die Datei in ILIAS erneut ändert.")
+        changed_hint.setContentsMargins(18, 0, 18, 4)
+        self.changed_card.lay.addWidget(changed_hint)
+        self.changed_table = list_table(["Datei", "Kurs", "Geändert in ILIAS", ""])
+        ch = self.changed_table.horizontalHeader()
+        ch.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for col in (1, 2):
+            ch.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+        ch.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        self.changed_table.setColumnWidth(3, 250)
+        self.changed_table.verticalHeader().setDefaultSectionSize(CHANGED_ROW)
+        self.changed_card.lay.addWidget(self.changed_table)
+        self.changed_card.hide()
+        self.body.addWidget(self.changed_card)
 
         # Zuletzt geladen
         recent = Card(margins=0, spacing=0)
@@ -251,7 +312,6 @@ class OverviewTab(Page):
 
         t = theme.tokens()
         self.stat_new.set(run.new if run else 0, t.success if run and run.new else None)
-        self.stat_updated.set(run.updated if run else 0, t.accent if run and run.updated else None)
         self.stat_errors.set(run.errors if run else 0, t.danger if run and run.errors else None)
 
         show_error(self.error, c.config_error or c.last_error)
@@ -263,9 +323,10 @@ class OverviewTab(Page):
         try:
             self._files = self.c.api.recent_files(50) if self.c.config else []
             self._removed = self.c.api.removed_items() if self.c.config else []
+            self._changed = self.c.api.changed_items() if self.c.config else []
         except Exception:  # noqa: BLE001, Anzeige darf nie abstürzen
             log.exception("Dateiliste konnte nicht geladen werden")
-            self._files, self._removed = [], []
+            self._files, self._removed, self._changed = [], [], []
         root = self.c.api.root_dir() if self.c.config else None
         t = theme.tokens()
         muted = QBrush(QColor(t.muted))
@@ -314,6 +375,47 @@ class OverviewTab(Page):
         rows = min(len(self._removed), 3)
         self.removed_table.setFixedHeight(self.removed_table.horizontalHeader().sizeHint().height() + rows * 44 + 4)
 
+        self._fill_changed()
+
+    def _fill_changed(self) -> None:
+        n = len(self._changed)
+        t = theme.tokens()
+        self.stat_changed.set(n, t.accent if n else None)
+        self.changed_title.setText(f"In ILIAS geändert ({n})")
+        self.changed_card.setVisible(bool(n))
+        self.btn_all_changed.setEnabled(True)
+        self.btn_all_changed.setText("Alle herunterladen")
+        self.btn_all_changed.setVisible(n > 1)
+        muted = QBrush(QColor(t.muted))
+        self.changed_table.setRowCount(n)
+        for row, f in enumerate(self._changed):
+            name = QTableWidgetItem(f.name)
+            name.setToolTip(str(f.local_path))
+            self.changed_table.setItem(row, 0, name)
+            self.changed_table.setItem(row, 1, QTableWidgetItem(logic.course_display_name(f.course_name)))
+            when = QTableWidgetItem(logic.relative_time(f.new_mtime or f.detected_at))
+            if f.old_mtime:
+                when.setToolTip(f"Geladene Version: {f.old_mtime:%d.%m.%Y %H:%M}")
+            when.setForeground(muted)
+            self.changed_table.setItem(row, 2, when)
+            btn_load = button("Herunterladen")
+            btn_load.setToolTip("Neue Version neben die vorhandene Datei legen")
+            btn_skip = button("Ignorieren", "ghost")
+            btn_skip.setToolTip("Nicht mehr melden, bis sich die Datei in ILIAS erneut ändert")
+            btn_load.clicked.connect(lambda _=False, r=f.ref_id, b=btn_load: self._download_changed(r, b))
+            btn_skip.clicked.connect(lambda _=False, r=f.ref_id: self._dismiss_changed(r))
+            self.changed_table.setCellWidget(row, 3, _cell_widget(btn_load, btn_skip))
+        rows = min(n, CHANGED_VISIBLE_ROWS)
+        header = self.changed_table.horizontalHeader().sizeHint().height()
+        self.changed_table.setFixedHeight(header + rows * CHANGED_ROW + 4)
+
+    def focus_changed(self) -> None:
+        """Aus Tray oder Benachrichtigung: Bereich "In ILIAS geändert" in den Blick holen."""
+        self.reload_files()
+        if self.changed_card.isVisible():
+            self.changed_table.setFocus()
+            self.changed_table.scrollToTop()
+
     def _toggle_removed(self, on: bool) -> None:
         self.removed_toggle.setArrowType(Qt.ArrowType.DownArrow if on else Qt.ArrowType.RightArrow)
         self.removed_table.setVisible(on)
@@ -361,6 +463,45 @@ class OverviewTab(Page):
         m.addAction("Datei öffnen", lambda: self._open_file(row))
         m.addAction("Ordner öffnen", lambda: self._open_file(row, folder=True))
         m.exec(self.table.viewport().mapToGlobal(pos))
+
+    def _download_changed(self, ref_id: int, btn: QPushButton) -> None:
+        btn.setEnabled(False)
+        btn.setText("Lädt ...")
+
+        def fail(e: Exception) -> None:
+            btn.setEnabled(True)
+            btn.setText("Herunterladen")
+            QMessageBox.warning(self, "Neue Version herunterladen", error_text(e))
+
+        run_task(self.c.api.download_changed, ref_id, on_done=lambda _: self.c.changed_handled(), on_error=fail)
+
+    def _dismiss_changed(self, ref_id: int) -> None:
+        try:
+            self.c.api.dismiss_changed(ref_id)
+        except Exception as e:  # noqa: BLE001
+            log.exception("Ignorieren fehlgeschlagen")
+            QMessageBox.warning(self, "Ignorieren", error_text(e))
+        self.c.changed_handled()
+
+    def _download_all_changed(self) -> None:
+        ref_ids = [f.ref_id for f in self._changed]
+        if not ref_ids:
+            return
+        self.btn_all_changed.setEnabled(False)
+        self.btn_all_changed.setText("Lädt ...")
+
+        def done(failed: list[str]) -> None:
+            self.c.changed_handled()
+            if failed:
+                QMessageBox.warning(self, "Neue Versionen herunterladen",
+                                    "Nicht alle Dateien konnten geladen werden:\n" + "\n".join(failed))
+
+        def fail(e: Exception) -> None:
+            # einzelne Dateien können schon geladen sein, daher Liste neu laden
+            self.c.changed_handled()
+            QMessageBox.warning(self, "Neue Versionen herunterladen", error_text(e))
+
+        run_task(download_all_changed, self.c.api, ref_ids, on_done=done, on_error=fail)
 
     def _redownload(self, ref_id: int, btn: QPushButton) -> None:
         btn.setEnabled(False)

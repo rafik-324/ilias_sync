@@ -31,6 +31,7 @@ from ilias_sync.api import (
     ActionKind,
     BaseDirCheck,
     Cancelled,
+    ChangedFile,
     Config,
     ConfigError,
     CourseConfig,
@@ -127,6 +128,7 @@ class FakeApi:
         self._runs: list[SyncRun] = []
         self._downloaded: dict[int, DownloadedFile] = {}
         self._removed: set[int] = set()
+        self._changed: dict[int, ChangedFile] = {}
 
         self._log_dir = self.workdir / "logs"
         self._log_dir.mkdir(parents=True, exist_ok=True)
@@ -199,7 +201,32 @@ class FakeApi:
             downloaded_at=now - timedelta(days=3),
             status=ItemStatus.USER_REMOVED,
         )
+        # Zwei geladene Dateien wurden danach in ILIAS geändert
+        for item in (items[1], items[3]):
+            self._mark_changed(item, now - timedelta(hours=20))
         self._runs.append(SyncRun(now - timedelta(days=1, minutes=2), now - timedelta(days=1), 5, 0, 0))
+
+    def _mark_changed(self, item: _Item, detected_at: datetime) -> ChangedFile:
+        loaded = self._downloaded[item.ref_id]
+        entry = ChangedFile(
+            ref_id=item.ref_id,
+            course_name=self._course_name(item.course_ref_id),
+            name=item.local_path.name,
+            local_path=item.local_path,
+            old_mtime=loaded.downloaded_at - timedelta(days=2),
+            new_mtime=detected_at - timedelta(hours=1),
+            new_size=item.size + 120_000,
+            detected_at=detected_at,
+        )
+        self._changed[item.ref_id] = entry
+        return entry
+
+    def _pending_change(self) -> int | None:
+        """Beim ersten Sync wird eine weitere geladene Datei als in ILIAS geändert erkannt."""
+        if self._sync_count != 0:
+            return None
+        ref = self._items()[0].ref_id
+        return ref if ref in self._downloaded and ref not in self._changed else None
 
     def _course_name(self, ref_id: int) -> str:
         return next(name for ref, name, _, _ in _COURSES if ref == ref_id)
@@ -397,13 +424,11 @@ class FakeApi:
             if item.ref_id in self._removed:
                 kind = ActionKind.SKIP_REMOVED
             elif item.ref_id in self._downloaded:
-                continue
+                if item.ref_id not in self._changed and item.ref_id != self._pending_change():
+                    continue
+                kind = ActionKind.CHANGED
             elif cfg is None or cfg.local_dir is None:
                 kind = ActionKind.UNASSIGNED
-            elif item.local_path.name == "Blatt_02.pdf" and self._sync_count == 0:
-                kind = ActionKind.UPDATE
-            elif item.local_path.name == "Fallstudie_1.pdf" and self._sync_count == 0:
-                kind = ActionKind.CONFLICT
             else:
                 kind = ActionKind.NEW
             actions.append(PlannedAction(kind, item.course_ref_id, name, item.ilias_path, item.local_path, item.size))
@@ -427,10 +452,10 @@ class FakeApi:
         if not self._logged_in:
             raise InvalidCredentialsError("Anmeldung bei ILIAS nötig.")
         actions = self._plan(progress, cancel)
-        todo = [a for a in actions if a.kind in (ActionKind.NEW, ActionKind.UPDATE, ActionKind.CONFLICT, ActionKind.UNASSIGNED)]
+        # geänderte Dateien werden nur gemeldet, nie automatisch geladen
+        todo = [a for a in actions if a.kind in (ActionKind.NEW, ActionKind.UNASSIGNED)]
         new_files: list[DownloadedFile] = []
         errors: list[str] = []
-        updated = 0
         cancelled = False
         items = {i.local_path: i for i in self._items()}
         try:
@@ -443,28 +468,31 @@ class FakeApi:
                     continue
                 self._write_file(action.local_path)
                 item = items[action.local_path]
-                status = ItemStatus.UPDATED if action.kind == ActionKind.UPDATE else ItemStatus.OK
                 entry = DownloadedFile(item.ref_id, action.course_name, action.local_path.name,
-                                       action.local_path, datetime.now(), status)
+                                       action.local_path, datetime.now(), ItemStatus.OK)
                 self._downloaded[item.ref_id] = entry
-                if action.kind == ActionKind.UPDATE:
-                    updated += 1
-                else:
-                    new_files.append(entry)
+                new_files.append(entry)
                 log.info("Heruntergeladen: %s", action.local_path.name)
         except Cancelled:
             cancelled = True
             log.info("Sync abgebrochen")
         progress(Progress("Herunterladen", len(todo), len(todo), None))
+        changed_files = []
+        if not cancelled:
+            for action in actions:
+                item = items.get(action.local_path)
+                if action.kind == ActionKind.CHANGED and item and item.ref_id not in self._changed:
+                    changed_files.append(self._mark_changed(item, datetime.now()))
+                    log.info("In ILIAS geändert: %s", action.local_path.name)
         self._sync_count += 1
-        run = SyncRun(started, datetime.now(), len(new_files), updated, len(errors), cancelled)
+        run = SyncRun(started, datetime.now(), len(new_files), 0, len(errors), cancelled)
         self._runs.append(run)
         unassigned = []
         if any(a.kind == ActionKind.UNASSIGNED for a in actions):
             unassigned = [IliasCourse(1007, self._course_name(1007), "FSS 2026",
                                       "https://ilias.uni-mannheim.de/goto.php?target=crs_1007")]
-        log.info("Sync fertig: %d neu, %d aktualisiert, %d Fehler", run.new, run.updated, run.errors)
-        return SyncResult(run, new_files, unassigned, errors)
+        log.info("Sync fertig: %d neu, %d in ILIAS geändert, %d Fehler", run.new, len(changed_files), run.errors)
+        return SyncResult(run, new_files, unassigned, errors, changed_files)
 
     def redownload(self, ref_id: int) -> DownloadedFile:
         time.sleep(self.delay * 10)
@@ -477,6 +505,29 @@ class FakeApi:
         log.info("Erneut heruntergeladen: %s", entry.name)
         return entry
 
+    def download_changed(self, ref_id: int) -> DownloadedFile:
+        time.sleep(self.delay * 10)
+        self._check_online()
+        changed = self._changed[ref_id]
+        # neue Version als <name>_ilias_<Datum> daneben, die vorhandene Datei bleibt
+        stem, suffix = changed.local_path.stem, changed.local_path.suffix
+        target = changed.local_path.with_name(f"{stem}_ilias_{datetime.now():%Y-%m-%d}{suffix}")
+        n = 2
+        while target.exists():
+            target = changed.local_path.with_name(f"{stem}_ilias_{datetime.now():%Y-%m-%d}_{n}{suffix}")
+            n += 1
+        self._write_file(target)
+        del self._changed[ref_id]
+        entry = DownloadedFile(ref_id, changed.course_name, target.name, target, datetime.now(), ItemStatus.UPDATED)
+        self._downloaded[ref_id] = entry
+        log.info("Neue ILIAS Version geladen: %s", target.name)
+        return entry
+
+    def dismiss_changed(self, ref_id: int) -> None:
+        entry = self._changed.pop(ref_id, None)
+        if entry is not None:
+            log.info("Änderung ignoriert: %s", entry.name)
+
     # ---------------- Status ----------------
 
     def last_run(self) -> SyncRun | None:
@@ -488,6 +539,9 @@ class FakeApi:
 
     def removed_items(self) -> list[DownloadedFile]:
         return [f for f in self._downloaded.values() if f.ref_id in self._removed]
+
+    def changed_items(self) -> list[ChangedFile]:
+        return sorted(self._changed.values(), key=lambda f: f.detected_at, reverse=True)
 
     # ---------------- Pfade ----------------
 

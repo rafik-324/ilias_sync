@@ -35,6 +35,7 @@ def action_color(kind: ActionKind) -> str:
     t = theme.tokens()
     return {
         ActionKind.NEW: t.success,
+        ActionKind.CHANGED: t.accent,
         ActionKind.UPDATE: t.accent,
         ActionKind.CONFLICT: t.warning,
         ActionKind.SKIP_REMOVED: t.faint,
@@ -227,7 +228,7 @@ class PreviewTree(QWidget):
     def _update_legend(self) -> None:
         self.legend.setText("&nbsp;&nbsp;&nbsp;".join(
             f'<span style="color:{action_color(k)}">●</span>&nbsp;{logic.ACTION_LABELS[k]}'
-            for k in ActionKind
+            for k in logic.LEGEND_KINDS
         ))
 
     def set_actions(self, actions: list[PlannedAction], root: Path | None) -> None:

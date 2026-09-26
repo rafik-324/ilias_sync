@@ -26,6 +26,7 @@ from ilias_sync.gui.tab_log import LogTab
 from ilias_sync.gui.tab_overview import OverviewTab
 from ilias_sync.gui.tab_preview import PreviewTab
 from ilias_sync.gui.tab_settings import SettingsTab
+from ilias_sync.gui.tray import ZIEL_GEAENDERT
 from ilias_sync.gui.widgets import role_label
 
 TAB_NAMES = ["overview", "courses", "preview", "settings", "log"]
@@ -212,6 +213,10 @@ class MainWindow(QMainWindow):
     def show_tab(self, name: str) -> None:
         if name in TAB_NAMES:
             self.select(TAB_NAMES.index(name))
+        elif name == ZIEL_GEAENDERT:
+            # Übersicht, Bereich "In ILIAS geändert" hervorheben
+            self.select(0)
+            self.overview.focus_changed()
         self.showNormal()
         activate_app()
         self.raise_()
