@@ -169,9 +169,9 @@ def test_check_base_dir(env):
     assert not check.exists and check.message and check.is_empty
     base.mkdir()
     check = api.check_base_dir(base)
-    assert check.exists and check.writable and not check.has_root_folder and check.is_empty
-    root = base / "01_Universität_Mannheim"
-    root.mkdir()
+    # ohne root_folder_name ist der gewählte Ordner selbst der Uni Ordner
+    assert check.exists and check.writable and check.has_root_folder and check.is_empty
+    root = base
     (root / ".DS_Store").write_bytes(b"")
     assert api.check_base_dir(base).is_empty
     (root / "01_SEMESTER").mkdir()
@@ -182,18 +182,32 @@ def test_check_base_dir(env):
     assert "leeren" in check.message
 
 
+def test_check_base_dir_mit_unterordner(env):
+    api, base, *_ = env
+    config.save_config(Config(base_dir=None, root_folder_name="01_Universität_Mannheim"), api._config_path)
+    base.mkdir()
+    check = api.check_base_dir(base)
+    assert not check.has_root_folder and check.is_empty
+    (base / "01_Universität_Mannheim" / "01_SEMESTER").mkdir(parents=True)
+    check = api.check_base_dir(base)
+    assert check.has_root_folder and not check.is_empty
+    assert "01_Universität_Mannheim" in check.message
+    api.create_base_structure(base)
+    assert api.root_dir() == base / "01_Universität_Mannheim"
+
+
 def test_create_base_structure(env):
     api, base, *_ = env
     api.create_base_structure(base)
-    assert (base / "01_Universität_Mannheim").is_dir()
+    assert base.is_dir()
     assert api.load_config().base_dir == base
-    assert api.root_dir() == base / "01_Universität_Mannheim"
+    assert api.root_dir() == base
 
 
 def test_suggest_mapping_existing_and_new(env):
     api, base, passwords, _ = env
     setup_account(api, base, passwords)
-    (base / "01_Universität_Mannheim" / "01_SEMESTER" / "01_marketing").mkdir(parents=True)
+    (base / "01_SEMESTER" / "01_marketing").mkdir(parents=True)
     courses = [
         IliasCourse(100, "Marketing [V] (HWS 2026)", "HWS 2026", "u"),
         IliasCourse(101, "Statistik I (HWS 2026)", "HWS 2026", "u"),
@@ -210,7 +224,7 @@ def test_local_course_dirs(env):
     cfg = api.load_config()
     cfg.ignore_local_dirs = ["*-MacBook*"]
     api.save_config(cfg)
-    semester = base / "01_Universität_Mannheim" / "01_SEMESTER"
+    semester = base / "01_SEMESTER"
     for d in ("01_marketing", "02_pi", "_Neue_Kurse", "01_marketing-MacBook Pro"):
         (semester / d).mkdir(parents=True)
     assert api.local_course_dirs("01_SEMESTER") == ["01_marketing", "02_pi"]
@@ -227,7 +241,7 @@ def test_sync_downloads_and_reports(env, monkeypatch):
     assert [f.name for f in result.new_files] == ["skript.pdf"]
     path = result.new_files[0].local_path
     assert path.read_bytes() == b"v1"
-    assert path == base / "01_Universität_Mannheim" / "01_semester" / "01_marketing" / "01_vorlesung" / "skript.pdf"
+    assert path == base / "01_semester" / "01_marketing" / "01_vorlesung" / "skript.pdf"
     # Neuer Kursordner steht jetzt in der Config
     assert [c.ref_id for c in api.load_config().courses] == [100]
     assert api.last_run().new == 1
@@ -280,7 +294,7 @@ def test_first_sync_into_existing_uni_folder_writes_nothing(env, monkeypatch):
     Der Sync muss abbrechen, bevor er ILIAS fragt oder irgendetwas schreibt."""
     api, base, passwords, session = env
     setup_account(api, base, passwords)
-    root = base / "01_Universität_Mannheim"
+    root = base
     (root / "01_SEMESTER" / "01_marketing" / "01_Vorlesung").mkdir(parents=True)
     (root / "01_SEMESTER" / "01_marketing" / "01_Vorlesung" / "01_Marketing_Vorlesungsskript.pdf").write_bytes(b"x")
     (root / "code_projects").mkdir()

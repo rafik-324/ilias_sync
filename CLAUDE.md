@@ -184,7 +184,7 @@ Der Nutzer gibt beim ersten Start **einmalig einen Basispfad** ein (z. B. `C:\Us
 * Neue Semester werden automatisch als nächste Nummer angelegt, sobald Kurse eines neuen Semesters in ILIAS auftauchen
 * Neue Kurse bekommen die nächste freie Nummer im Semesterordner, Name aus dem ILIAS Kursnamen ohne Semesterzusatz (z. B. "Marketing (HWS 2026)" -> `01_marketing`)
 * Ordnernamen für neu angelegte Kurse sind in der GUI (Tab Kurse) umbenennbar, das Tool merkt sich die Zuordnung per ref_id
-* Der Name `01_Universität_Mannheim` ist in der Config änderbar (`root_folder_name`)
+* **Seit 2026-10-08 (Wunsch des Nutzers)**: Standard ist `root_folder_name = ""`, der im Wizard gewählte Ordner ist dann selbst der Uni Ordner, `01_Universität_Mannheim` wird nicht mehr erzeugt. Ein Name in der Config (alte Configs, Einstellungen "Unterordner (optional)") legt wie bisher diesen Unterordner an
 
 ## Lokale Ordnerstruktur des Nutzers (Semester 1)
 
@@ -282,7 +282,7 @@ Ab Semester 2 pflegt der Nutzer die Struktur selbst über die Config bzw. GUI. R
 ```toml
 [general]
 base_dir = "~/Documents/Uni"                  # einmalig im Setup Wizard eingegeben
-root_folder_name = "01_Universität_Mannheim"  # wird unter base_dir angelegt
+root_folder_name = ""                         # leer: base_dir ist selbst der Uni Ordner, sonst Unterordner
 sync_interval_minutes = 1440                  # Standard: einmal am Tag
 max_parallel = 3
 semester_pattern = '\((HWS|FSS) (\d{4})\)'

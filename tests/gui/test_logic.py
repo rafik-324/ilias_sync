@@ -159,7 +159,6 @@ def test_validate_settings_ok():
     "kw, fragment",
     [
         ({"base_dir": None}, "Basisordner"),
-        ({"root_folder_name": ""}, "darf nicht leer"),
         ({"root_folder_name": "Uni:Mannheim"}, "unzulässige Zeichen"),
         ({"root_folder_name": "Uni."}, "unzulässige Zeichen"),
         ({"sync_interval_minutes": 5}, "Intervall"),

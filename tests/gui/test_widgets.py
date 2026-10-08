@@ -292,14 +292,14 @@ def test_wizard_basisordner_mit_inhalt_wird_abgelehnt(qtbot, fake_first_run, tmp
     page = BaseDirPage(fake_first_run)
     qtbot.addWidget(page)
     voll = tmp_path / "voll"
-    (voll / "01_Universität_Mannheim" / "01_SEMESTER").mkdir(parents=True)
+    (voll / "01_SEMESTER").mkdir(parents=True)
     page.path.setText(str(voll))
     page._run_check()
     assert not page.isComplete()
     assert "Inhalt" in page.status.text()
 
     leer = tmp_path / "leer"
-    (leer / "01_Universität_Mannheim").mkdir(parents=True)
+    leer.mkdir()
     page.path.setText(str(leer))
     page._run_check()
     assert page.isComplete()
@@ -450,7 +450,7 @@ def test_wizard_kompletter_durchlauf_mit_fehlerfaellen(qtbot, fake_first_run, mo
     page._run_check()
     assert page.isComplete()
     wiz.next()
-    assert (base / "01_Universität_Mannheim").is_dir()
+    assert base.is_dir()
 
     # 3. Kurse: zuerst offline, dann Erneut versuchen
     page = wiz.currentPage()

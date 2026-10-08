@@ -73,7 +73,7 @@ class CourseConfig:
 @dataclass
 class Config:
     base_dir: Path | None
-    root_folder_name: str = "01_Universität_Mannheim"
+    root_folder_name: str = ""  # leer: der gewählte Basisordner ist selbst der Uni Ordner
     sync_interval_minutes: int = 1440  # Standard: einmal am Tag (Entscheidung des Nutzers 2026-09-26)
     max_parallel: int = 3             # 1 bis 5
     semester_pattern: str = r"\((HWS|FSS) (\d{4})\)"

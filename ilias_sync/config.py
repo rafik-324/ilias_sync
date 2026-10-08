@@ -192,7 +192,8 @@ def validate(cfg: Config) -> None:
         re.compile(cfg.semester_pattern)
     except re.error as e:
         raise ConfigError(f"general.semester_pattern: kein gültiger regulärer Ausdruck ({e})") from None
-    _check_folder_name(cfg.root_folder_name, "general.root_folder_name")
+    if cfg.root_folder_name:  # leer erlaubt: dann ist der Basisordner selbst der Uni Ordner
+        _check_folder_name(cfg.root_folder_name, "general.root_folder_name")
     if cfg.username is not None and (not cfg.username or cfg.username != cfg.username.strip()
                                      or " " in cfg.username):
         raise ConfigError("general.username: Uni-ID ohne Leerzeichen erwartet")

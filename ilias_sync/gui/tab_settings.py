@@ -75,9 +75,11 @@ class SettingsTab(Page):
         box_storage = QGroupBox("Ablage")
         f1 = _form(box_storage)
         f1.addRow("Basisordner", base_row)
-        f1.addRow("Name des Uni Ordners", self.root_name)
-        f1.addRow("", hint_label("Wird unter dem Basisordner angelegt. Ein neuer Basisordner oder Name bedeutet "
-                                 "einen neuen Uni Ordner, der erste Sync dorthin braucht einen leeren Ordner."))
+        self.root_name.setPlaceholderText("leer: direkt im Basisordner")
+        f1.addRow("Unterordner (optional)", self.root_name)
+        f1.addRow("", hint_label("Leer lassen, dann ist der Basisordner selbst der Uni Ordner. Ein neuer Basisordner "
+                                 "oder Unterordner bedeutet einen neuen Uni Ordner, der erste Sync dorthin braucht "
+                                 "einen leeren Ordner."))
 
         # Sync
         self.interval = IntervalBox()
@@ -304,7 +306,7 @@ class SettingsTab(Page):
         if not check.is_empty:
             answer = QMessageBox.warning(
                 self, "Basisordner",
-                "Der Uni Ordner in diesem Basisordner enthält schon Dateien. Hat ILIAS Sync ihn nicht selbst "
+                "Der Uni Ordner an dieser Stelle enthält schon Dateien. Hat ILIAS Sync ihn nicht selbst "
                 "befüllt, wird der erste Sync dorthin verweigert, damit nichts mit deinen eigenen Unterlagen "
                 "durcheinanderkommt.\n\nTrotzdem diesen Ordner wählen?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,

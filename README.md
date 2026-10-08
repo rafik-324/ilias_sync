@@ -118,22 +118,21 @@ Das Design folgt automatisch dem hellen oder dunklen Modus des Systems.
 
 ## Ordnerstruktur
 
-Unter dem Basisordner legt das Tool diese Struktur an:
+Im gewählten Uni Ordner legt das Tool diese Struktur an:
 
 ```
-<Basisordner>/
-└── 01_Universität_Mannheim/
-    ├── 01_semester/                         chronologisch nach Semester (HWS 2026, FSS 2027 ...)
-    │   ├── 01_marketing/                    ein Ordner pro Veranstaltung
-    │   │   ├── 01_vorlesung/
-    │   │   ├── 02_uebung/
-    │   │   └── 03_tutorium/
-    │   └── 03_praktische_informatik_i/
-    │       └── 01_vorlesung/
-    │           └── 01_vom_problem_zum_programm/
-    │               └── 01_videos/           Videos liegen getrennt neben den PDFs
-    ├── _neue_kurse/                         Kurse, die noch keinem Ordner zugeordnet sind
-    └── _ohne_semester/                      Kurse ohne Semester im Namen
+<Uni Ordner>/
+├── 01_semester/                         chronologisch nach Semester (HWS 2026, FSS 2027 ...)
+│   ├── 01_marketing/                    ein Ordner pro Veranstaltung
+│   │   ├── 01_vorlesung/
+│   │   ├── 02_uebung/
+│   │   └── 03_tutorium/
+│   └── 03_praktische_informatik_i/
+│       └── 01_vorlesung/
+│           └── 01_vom_problem_zum_programm/
+│               └── 01_videos/           Videos liegen getrennt neben den PDFs
+├── _neue_kurse/                         Kurse, die noch keinem Ordner zugeordnet sind
+└── _ohne_semester/                      Kurse ohne Semester im Namen
 ```
 
 **Namensregel für alles, was das Tool neu anlegt**: nur Kleinbuchstaben, Ziffern, `_`, `-` und Punkt. Leerzeichen werden zu `_`, Umlaute zu `ae`, `oe`, `ue`, `ss`. Aus `Ü1 Übungsskript Kernlösung.pdf` wird `ue1_uebungsskript_kernloesung.pdf`. Neue Ordnernamen sind höchstens 40 Zeichen lang, gekürzt wird am Wortende mit einem kurzen, stabilen Kennzeichen (`09a_objektorientierte_ec0c`). Der gesamte Pfad bleibt unter 250 Zeichen, damit er auch unter Windows funktioniert.
@@ -179,7 +178,7 @@ Die Config wird von der App angelegt und gepflegt, lässt sich aber auch von Han
 ```toml
 [general]
 base_dir = "~/Documents/Uni"
-root_folder_name = "01_Universität_Mannheim"
+root_folder_name = ""          # optional: Unterordner im Basisordner
 sync_interval_minutes = 1440   # Standard: einmal am Tag
 max_parallel = 3                              # 1 bis 5
 semester_pattern = '\((HWS|FSS) (\d{4})\)'

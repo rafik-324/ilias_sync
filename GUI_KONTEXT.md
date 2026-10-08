@@ -110,7 +110,7 @@ class CourseConfig:
 @dataclass
 class Config:
     base_dir: Path | None
-    root_folder_name: str = "01_Universität_Mannheim"
+    root_folder_name: str = ""  # leer: der gewählte Basisordner ist selbst der Uni Ordner (seit 2026-10-08)
     sync_interval_minutes: int = 1440   # Standard einmal am Tag
     max_parallel: int = 3             # 1 bis 5
     semester_pattern: str = r"\((HWS|FSS) (\d{4})\)"
@@ -361,7 +361,7 @@ Klein und übersichtlich, Startgröße etwa 800 × 560, Größe und Position wer
 ### 6.4 Einstellungen
 * Button **Jetzt synchronisieren** oben rechts (wie in der Übersicht, deaktiviert während eines Syncs, bei Login nötig öffnet er den Login Dialog). Ungespeicherte Einstellungen vorher speichern oder verwerfen lassen, denn der Sync nutzt die gespeicherte Config
 * **Basisordner**: Anzeige plus "Ändern ..." (nativer Ordnerdialog `QFileDialog.getExistingDirectory`). Vor dem Übernehmen Warnung: "Vorhandene Dateien werden nicht verschoben. Neue Downloads landen im neuen Ordner." Danach `check_base_dir`. Ist `is_empty` falsch, zusätzlich warnen: der erste Sync in einen fremden Uni Ordner mit Inhalt wird verweigert
-* **Name des Uni Ordners** (`root_folder_name`)
+* **Unterordner (optional)** (`root_folder_name`, leer = Basisordner ist selbst der Uni Ordner)
 * **Intervall** in Minuten (`QSpinBox`, 15 bis 1440)
 * **Parallelität** (`QSpinBox`, 1 bis 5, Standard 3)
 * **Semester Muster** (Regex, mit Prüfung auf Gültigkeit vor dem Speichern)

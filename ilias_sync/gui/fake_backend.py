@@ -378,7 +378,7 @@ class FakeApi:
         path = Path(path).expanduser()
         exists = path.is_dir()
         writable = exists and os.access(path, os.W_OK)
-        root_name = self._config.root_folder_name if self._config else "01_Universität_Mannheim"
+        root_name = self._config.root_folder_name if self._config else ""
         root = path / root_name
         has_root = root.is_dir()
         semesters = sorted(p.name for p in root.iterdir() if p.is_dir()) if has_root else []
@@ -392,7 +392,7 @@ class FakeApi:
 
     def create_base_structure(self, path: Path) -> None:
         path = Path(path).expanduser()
-        root_name = self._config.root_folder_name if self._config else "01_Universität_Mannheim"
+        root_name = self._config.root_folder_name if self._config else ""
         if self._inside_workdir(path):
             (path / root_name).mkdir(parents=True, exist_ok=True)
         else:

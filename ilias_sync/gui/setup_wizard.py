@@ -90,14 +90,14 @@ class BaseDirPage(QWizardPage):
     def __init__(self, api) -> None:
         super().__init__()
         self.api = api
-        self.setTitle("Basisordner festlegen")
-        self.setSubTitle("Unter diesem Ordner legt ILIAS Sync alle Unterordner selbst an. "
-                         "Der erste Sync braucht einen neuen oder leeren Uni Ordner.")
+        self.setTitle("Uni Ordner festlegen")
+        self.setSubTitle("In diesem Ordner legt ILIAS Sync alle Unterordner selbst an. "
+                         "Der erste Sync braucht einen neuen oder leeren Ordner.")
         self._check: BaseDirCheck | None = None
         try:
             self.root_name = api.load_config().root_folder_name
         except Exception:  # noqa: BLE001, ungültige Config: Standardname verwenden
-            self.root_name = "01_Universität_Mannheim"
+            self.root_name = ""
 
         self.path = QLineEdit()
         self.path.setPlaceholderText("z. B. C:\\Users\\name\\OneDrive oder ~/Documents")
@@ -127,7 +127,7 @@ class BaseDirPage(QWizardPage):
         lay.addWidget(role_label("So wird es aussehen", "section"))
         lay.addWidget(self.structure)
         lay.addStretch(1)
-        lay.addWidget(hint_label("Ein Uni Ordner, in dem schon Dateien liegen, wird nicht befüllt. "
+        lay.addWidget(hint_label("Ein Ordner, in dem schon Dateien liegen, wird nicht befüllt. "
                                  "So kommt nichts mit deinen eigenen Unterlagen durcheinander. "
                                  "Der Ordner kann später in den Einstellungen geändert werden."))
 
@@ -141,7 +141,7 @@ class BaseDirPage(QWizardPage):
 
     def _browse(self) -> None:
         start = self.path.text() or str(Path.home())
-        chosen = QFileDialog.getExistingDirectory(self, "Basisordner wählen", start)
+        chosen = QFileDialog.getExistingDirectory(self, "Uni Ordner wählen", start)
         if chosen:
             self.path.setText(chosen)
 
@@ -176,11 +176,15 @@ class BaseDirPage(QWizardPage):
             self.status.setText("Der Ordner existiert noch nicht und wird nach Rückfrage angelegt.")
             theme.set_role(self.status, "warning")
         elif not c.is_empty:
+            where = f"einen Ordner {self.root_name}" if self.root_name else "diesen Ordner"
             self.status.setText(
-                f"Hier gibt es schon einen Ordner {self.root_name} mit Inhalt. Der erste Sync läuft nur in "
-                "einen neuen oder leeren Uni Ordner. Bitte einen anderen Basisordner wählen."
+                f"Hier gibt es schon {where} mit Inhalt. Der erste Sync läuft nur in "
+                "einen neuen oder leeren Ordner. Bitte einen anderen Ordner wählen."
             )
             theme.set_role(self.status, "error")
+        elif not self.root_name:
+            self.status.setText("Leerer Ordner. Er wird direkt als Uni Ordner verwendet.")
+            theme.set_role(self.status, "success")
         elif c.has_root_folder:
             self.status.setText(f"Leerer Ordner {self.root_name} gefunden. Er wird verwendet.")
             theme.set_role(self.status, "success")
@@ -188,12 +192,13 @@ class BaseDirPage(QWizardPage):
             self.status.setText(f"Ordner ist nutzbar. {self.root_name} wird darin angelegt.")
             theme.set_role(self.status, "success")
         if c.is_empty:
-            self.structure.setText("\n".join([
-                str(path),
-                f"└── {self.root_name}/",
-                "    └── 01_semester/",
-                "        └── NN_kursname/NN_kategorie/ ...",
-            ]))
+            lines = [str(path)]
+            indent = ""
+            if self.root_name:
+                lines.append(f"└── {self.root_name}/")
+                indent = "    "
+            lines += [f"{indent}└── 01_semester/", f"{indent}    └── NN_kursname/NN_kategorie/ ..."]
+            self.structure.setText("\n".join(lines))
         else:
             self.structure.setText("")
         self.completeChanged.emit()

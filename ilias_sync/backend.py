@@ -237,7 +237,7 @@ class Api:
         elif not writable:
             message = "In diesen Ordner darf nicht geschrieben werden."
         elif not is_empty:
-            message = (f"{root_name} enthält schon Dateien. Der erste Sync braucht einen leeren "
+            message = (f"{root_name or 'Der Ordner'} enthält schon Dateien. Der erste Sync braucht einen leeren "
                        "oder neuen Uni Ordner.")
         return BaseDirCheck(exists, writable, has_root, semesters, message, is_empty)
 

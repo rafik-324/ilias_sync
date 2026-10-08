@@ -416,10 +416,8 @@ def validate_settings(cfg: Config) -> list[str]:
     errors: list[str] = []
     if cfg.base_dir is None or not str(cfg.base_dir).strip():
         errors.append("Bitte einen Basisordner wählen.")
-    name = cfg.root_folder_name.strip()
-    if not name:
-        errors.append("Der Name des Uni Ordners darf nicht leer sein.")
-    elif re.search(r'[<>:"/\\|?*]', name) or name.endswith((".", " ")):
+    name = cfg.root_folder_name.strip()  # leer erlaubt: Basisordner ist selbst der Uni Ordner
+    if name and (re.search(r'[<>:"/\\|?*]', name) or name.endswith((".", " "))):
         errors.append('Der Name des Uni Ordners enthält unzulässige Zeichen (<>:"/\\|?* oder Punkt am Ende).')
     if not 15 <= cfg.sync_interval_minutes <= 1440:
         errors.append("Das Intervall muss zwischen 15 und 1440 Minuten liegen.")
