@@ -154,7 +154,7 @@ def test_example_path_from_user_test_fits(tmp_path):
     from ilias_sync.api import Config, CourseConfig
     from ilias_sync.crawler import Course, CrawlResult, IliasObject
 
-    base = "/Users/rafik/Library/CloudStorage/OneDrive-Persönlich/01_Universität_Mannheim/pers_test_iliassync"
+    base = "/Users/name/Library/CloudStorage/OneDrive-Persönlich/01_Universität_Mannheim/uni_test"
     root = pu.Path(base) / "01_Universität_Mannheim"
     pi1 = Course("crs", 1, "Praktische Informatik I [V] [1. PG] (HWS 2026)", "u1", "HWS 2026", "HWS 2026")
     folder = "09a Objektorientierte Programmierung: Fortgeschrittene Konzepte"

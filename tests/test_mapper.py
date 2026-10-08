@@ -17,7 +17,7 @@ STRUCTURE = [
     "01_SEMESTER/02_praktische_informatik_I/01_Vorlesung/01 Einführung",
     "01_SEMESTER/02_praktische_informatik_I/02_Übung",
     "01_SEMESTER/02_praktische_informatik_I/03_Tutorium",
-    "01_SEMESTER/02_praktische_informatik_I/04_code/01_übung-MacBook Pro von Rafael",
+    "01_SEMESTER/02_praktische_informatik_I/04_code/01_übung-MacBook Pro von Max",
     "01_SEMESTER/03_programmier_praktikum_1/01_Vorlesung",
     "01_SEMESTER/03_programmier_praktikum_1/02_Übung",
     "01_SEMESTER/03_programmier_praktikum_1/03_Tutorium/01_tutorium",

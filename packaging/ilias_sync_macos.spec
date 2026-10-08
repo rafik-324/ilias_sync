@@ -21,7 +21,7 @@ sys.path.insert(0, PROJECT)
 import ilias_sync
 
 APP_NAME = "ILIAS Sync"
-BUNDLE_ID = "de.rafik.ilias-sync"
+BUNDLE_ID = "io.github.rafik-324.ilias-sync"
 
 # Logo und Tray Icons der GUI (SVG), geladen über Path(__file__).parent / "assets"
 ASSETS = os.path.join(PROJECT, "ilias_sync", "gui", "assets")

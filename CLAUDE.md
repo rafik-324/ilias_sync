@@ -27,42 +27,15 @@ Desktop App, die automatisch alle Inhalte aus ILIAS der Universität Mannheim he
 
 ## Entwicklung
 
-### Zwei Agenten, zwei Worktrees
+Rechner spezifische Angaben (Pfade, Worktrees, Python Umgebungen, Verlauf) stehen in `CLAUDE.local.md`, die nicht im Repo liegt.
 
-Backend und GUI werden parallel von zwei Claude Sitzungen entwickelt. Jede hat ihren eigenen Git Worktree, damit keine die Dateien der anderen verändert (auch nicht bei `rebase` oder `checkout`):
-
-| Ordner | Branch | Wer |
-|---|---|---|
-| Windows: `C:\Users\rafik\OneDrive\01_Universität_Mannheim\code_projects\Ilias_getter` | `main` | Backend Agent |
-| macOS: `/Users/rafik/Library/CloudStorage/OneDrive-Persönlich/01_Universität_Mannheim/code_projects/Ilias_getter` | `main` | Backend Agent |
-| Windows: `C:\Users\rafik\dev\ilias_sync-gui` (außerhalb von OneDrive) | `gui` | GUI Agent |
-| macOS: `~/dev/ilias_sync-gui` (eigener Klon statt Worktree, Remote `lokal` = OneDrive Repo, `origin` = GitHub) | `gui` | GUI Agent |
-
-Das Repo liegt in OneDrive und wird auf beiden Rechnern genutzt. Zuerst per `uname` bzw. Plattform prüfen, auf welchem System die Sitzung läuft, und nur die Pfade dieses Systems verwenden. Worktree Einträge des anderen Systems erscheinen bei `git worktree list` als `prunable`: **nie `git worktree prune` ausführen**, sonst ist der Worktree auf dem anderen Rechner kaputt. Den Ordner `tests 2` (OneDrive Konfliktkopie) ignorieren.
-
-* Nur im eigenen Ordner lesen, schreiben, testen und Git Befehle ausführen, immer mit absoluten Pfaden
+* Backend und GUI können parallel entwickelt werden: Backend auf `main`, GUI auf `gui` in einem eigenen Worktree oder Klon. `gui` wird nach getesteten Schritten nach `main` gemergt, danach `main` in `gui` übernommen
 * Gemeinsame Dateien (`api.py` Vertrag, `GUI_KONTEXT.md`, `CLAUDE.md`, `requirements*.txt`, `pyproject.toml`) nur klein ändern und in der Commit Nachricht erwähnen
-* `gui` wird regelmäßig nach `main` gemergt (nach getesteten Schritten, nach Rückfrage beim Nutzer), danach `main` in `gui` übernehmen
-
-### Git und GitHub
-
-* Remote: `origin` = `https://github.com/rafik-324/ilias_sync.git` (privat)
-* Commit E-Mail im Repo: `215122369+rafik-324@users.noreply.github.com` (GitHub blockiert Pushes mit der privaten Adresse)
-* Nach getesteten Schritten selbst committen, pushen nur nach Rückfrage
-* Keine Historie umschreiben, solange ein anderer Agent im Repo arbeitet
-* **Zwischen Windows und macOS nur über GitHub abgleichen, nie auf OneDrive verlassen.** OneDrive synchronisiert den `.git` Ordner nicht zuverlässig (am 2026-09-26 fehlten auf dem Mac 8 Commits vom Windows Rechner, Meilenstein 3 wurde doppelt gebaut). Daher:
-  * Zu Beginn jeder Sitzung `git fetch origin` und prüfen, ob `origin/main` bzw. `origin/gui` neuer ist. Wenn ja, erst übernehmen (`git merge origin/<branch>`), dann arbeiten
-  * Am Ende einer Arbeitsphase auf einem Rechner pushen (nach Rückfrage beim Nutzer), damit der andere Rechner den Stand bekommt
-  * Beim Wechsel des Rechners zuerst in beiden Ordnern (`main` und `gui`) pullen
-
-### Python Umgebung
-
+* Nach getesteten Schritten committen, pushen nur nach Rückfrage. Keine Historie umschreiben, solange ein anderer Agent im Repo arbeitet
+* Mehrere Rechner nur über das Remote abgleichen, nicht über Cloud Ordner (OneDrive synchronisiert `.git` nicht zuverlässig)
+* venv außerhalb von Cloud Ordnern, Pakete aus `requirements-dev.txt`, Python 3.11 oder neuer
 * Getrennte Testumgebung: Umgebungsvariable `ILIAS_SYNC_HOME` bzw. CLI `--config-dir ORDNER` lenkt Config, Daten (Index, Cookies) und Log nach `<ORDNER>/config`, `/data`, `/logs`. Schlüsselbund bleibt gleich
-* Eine gemeinsame venv pro Rechner für beide Agenten, alle Pakete aus `requirements-dev.txt`. Nicht im Projektordner, weil OneDrive sonst tausende Dateien synchronisiert
-* Windows: `C:\Users\rafik\.venvs\ilias-sync` (Python 3.13). `python` im PATH ist nur der Microsoft Store Alias, daher immer den vollen Pfad nutzen: `C:\Users\rafik\.venvs\ilias-sync\Scripts\python.exe -m pytest`
-* macOS: `~/.venvs/ilias-sync` (Homebrew Python 3.12). `/usr/bin/python3` ist 3.9 und zu alt, daher immer `~/.venvs/ilias-sync/bin/python -m pytest`
-* macOS Pfade der App: Config und Daten (`config.toml`, `cookies.txt`) in `~/Library/Application Support/ilias-sync`, Log in `~/Library/Logs/ilias-sync`, Passwort im Schlüsselbund. Der Ordner `ilias-getter` dort stammt von einem alten Prototyp und wird nicht benutzt
-* CLI Befehle mit Passworteingabe (`--login`) führt der Nutzer selbst aus (in Claude Code mit `!` Präfix)
+* CLI Befehle mit Passworteingabe (`--login`) führt der Nutzer selbst aus
 * Tests immer aus dem eigenen Worktree starten, damit dessen Code getestet wird (`pythonpath = ["."]` in `pyproject.toml`)
 
 ## Architektur
@@ -169,7 +142,7 @@ Jeder Objekttyp ist in den Einstellungen pro Kurs einzeln abschaltbar (Standard:
 
 ## Ordneraufbau ab Basispfad
 
-Der Nutzer gibt beim ersten Start **einmalig einen Basispfad** ein (z. B. `C:\Users\rafik\OneDrive\Uni` oder `~/Documents/Uni`). Alles darunter erstellt das Tool selbst nach diesem Schema:
+Der Nutzer gibt beim ersten Start **einmalig einen Basispfad** ein (z. B. `C:\Users\name\OneDrive\Uni` oder `~/Documents/Uni`). Alles darunter erstellt das Tool selbst nach diesem Schema:
 
 ```
 <Basispfad>/
@@ -186,9 +159,9 @@ Der Nutzer gibt beim ersten Start **einmalig einen Basispfad** ein (z. B. `C:\Us
 * Ordnernamen für neu angelegte Kurse sind in der GUI (Tab Kurse) umbenennbar, das Tool merkt sich die Zuordnung per ref_id
 * **Seit 2026-10-08 (Wunsch des Nutzers)**: Standard ist `root_folder_name = ""`, der im Wizard gewählte Ordner ist dann selbst der Uni Ordner, `01_Universität_Mannheim` wird nicht mehr erzeugt. Ein Name in der Config (alte Configs, Einstellungen "Unterordner (optional)") legt wie bisher diesen Unterordner an
 
-## Lokale Ordnerstruktur des Nutzers (Semester 1)
+## Beispiel: vorhandene Ordnerstruktur
 
-Bestehende Struktur unter dem Basispfad, muss vom Tool erkannt und weiterverwendet werden:
+So eine gewachsene Struktur unter dem Basispfad muss vom Tool erkannt und weiterverwendet werden (Grundlage der Mapper Tests):
 
 ```
 01_Universität_Mannheim/
@@ -225,7 +198,7 @@ Beobachtungen, die der Code berücksichtigen muss:
 * Groß/Kleinschreibung ist uneinheitlich (`01_Vorlesung` vs `01_vorlesung`)
 * Umlaute und Ersatzschreibweise gemischt (`02_Übung` vs `02_uebung`)
 * Nummernpräfixe `NN_` vor Kategorien und Kursen
-* Ordner mit Konfliktnamen aus Cloud Sync existieren (z. B. `01_übung-MacBook Pro von Rafael`), diese ignorieren
+* Ordner mit Konfliktnamen aus Cloud Sync existieren (z. B. `01_übung-MacBook Pro von Max`), diese ignorieren
 
 ## Mapping (mapper.py)
 
@@ -401,19 +374,11 @@ Sync läuft immer in einem Worker Thread (`QThread`), die GUI blockiert nie.
 * PyInstaller Spec für macOS (`.app`, `LSUIElement=true`, Icon `.icns`) und Windows (`.exe`, ohne Konsolenfenster, Icon `.ico`)
 * Eigene Icons für hellen und dunklen Modus (macOS Menüleiste: Template Image)
 * `requirements.txt` mit gepinnten Versionen
-* **macOS (Stand 2026-09-26)**: `packaging/ilias_sync_macos.spec` mit Startdatei `packaging/launcher.py` (`__main__.py` nutzt relative Importe und taugt nicht als Skript). Bauen immer nach außerhalb von OneDrive:
-  `~/.venvs/ilias-sync/bin/pyinstaller packaging/ilias_sync_macos.spec --noconfirm --distpath ~/dev/ilias_sync-build/dist --workpath ~/dev/ilias_sync-build/build`.
-  Ergebnis `ILIAS Sync.app` (etwa 104 MB, Bundle ID `de.rafik.ilias-sync`, `LSUIElement`, noch ohne eigenes Icon und unsigniert). Geprüft: startet ohne Dock Icon (`lsappinfo`: UIElement), Schlüsselbund im Bundle funktioniert, `--status` zeigt Pfade, Schlüsselbund, Session und den Autostart Befehl (zeigt auf das Programm in der `.app`). Autostart erst einschalten, wenn die App an ihrem endgültigen Ort liegt (z. B. `/Applications`), sonst zeigt der LaunchAgent ins Leere
-* **Signatur (2026-10-08)**: Ad hoc signiert ändert sich die Code Identität mit jedem Build, der Schlüsselbund fragt dann jedes Mal neu. Die Spec signiert deshalb mit dem selbst erstellten Zertifikat "ILIAS Sync Lokal" (Typ Codesignierung, im Anmelde Schlüsselbund, vom Nutzer per Schlüsselbundverwaltung angelegt), falls vorhanden, sonst ad hoc
+* **macOS**: `packaging/ilias_sync_macos.spec` mit Startdatei `packaging/launcher.py` (`__main__.py` nutzt relative Importe und taugt nicht als Skript). Bauen nach außerhalb von Cloud Ordnern:
+  `pyinstaller packaging/ilias_sync_macos.spec --noconfirm --distpath <ordner>/dist --workpath <ordner>/build`.
+  Ergebnis `ILIAS Sync.app` (Bundle ID `io.github.rafik-324.ilias-sync`, `LSUIElement`). Autostart erst einschalten, wenn die App an ihrem endgültigen Ort liegt (z. B. `/Applications`), sonst zeigt der LaunchAgent ins Leere
+* **Signatur**: Ad hoc signiert ändert sich die Code Identität mit jedem Build, der Schlüsselbund fragt dann jedes Mal neu. Die Spec signiert deshalb mit einem selbst erstellten Zertifikat "ILIAS Sync Lokal" (Typ Codesignierung, im Anmelde Schlüsselbund), falls vorhanden, sonst ad hoc
 
-### Weitergabe an Kommilitonen (vorgemerkt, erst wenn das Programm fertig ist)
-
-Entscheidung des Nutzers 2026-09-26: Kollegen sollen die Mac App über die private Webseite des Nutzers laden können. Kein Apple Developer Account (zu teuer), also keine Notarisierung.
-* Release Skript: App bauen, als `ILIAS-Sync-<version>.dmg` packen (App plus Verknüpfung zu Programme), SHA-256 Prüfsumme daneben. Signatur bleibt ad hoc (reicht auf Apple Silicon zum Starten)
-* Anleitungstext auf Deutsch für die Webseite: DMG öffnen, App nach Programme ziehen, beim ersten Start einmal Systemeinstellungen → Datenschutz & Sicherheit → "Trotzdem öffnen" (Alternative `xattr -dr com.apple.quarantine`)
-* Hochladen macht der Nutzer selbst, das Tool hat keinen Zugriff auf die Webseite
-* Offen: Universal Build für Intel Macs nötig? (braucht Python von python.org statt Homebrew)
-* Jeder nutzt seine eigene Uni-ID, es werden keine Materialien weitergegeben (siehe Rechtliches)
 
 ## Meilensteine
 
@@ -427,22 +392,13 @@ Entscheidung des Nutzers 2026-09-26: Kollegen sollen die Mac App über die priva
 
 Nach jedem Meilenstein lauffähig und getestet, bevor der nächste beginnt.
 
-**Stand (2026-09-25)**: Meilenstein 1 und 2 fertig, Crawler mit 3 parallelen Abrufen und automatischem Relogin. Meilenstein 4 (Mapper) vorgezogen und weitgehend fertig. Meilenstein 3 im CLI fertig: Status Index (`state.py`), `--dry-run` und `--sync` (`sync.py`). Seit 2026-09-26 (Mac): kein `_alt_` mehr, geänderte Dateien nur melden (`ilias_changed`, `sync.download_changed`, `State.dismiss_changed`), belegte Namen ohne Inhaltsvergleich als `_ilias_<Datum>` daneben. Alte Index Datenbanken bekommen die neuen Spalten beim Öffnen. Es fehlt noch die echte `api.Api` für die GUI. `--test-sync` bleibt für Tests. **Der echte `01_SEMESTER` wird nie beschrieben** (Vorgabe des Nutzers). GUI (Meilenstein 6) läuft parallel auf Branch `gui` gegen das Fake Backend.
+**Stand**: Meilensteine 1 bis 4 und 6 fertig, macOS Build fertig, Windows Build offen.
 
-Entscheidung des Nutzers (2026-09-25): **Der erste echte Sync läuft in einen komplett neuen, leeren Basisordner** und lädt alles einmal herunter (auch Videos, auch den Lizenzkurs unter `_Ohne_Semester`). Die bisherigen eigenen Ordner bleiben unberührt, das Tool legt die Struktur selbst an. Umsetzung:
-* Erster Sync (Index für diesen Uni Ordner leer) nur, wenn es im Uni Ordner keine `NN_semester` bzw. `_ohne_semester` Ordner mit Inhalt gibt, sonst Abbruch mit Hinweis (`sync.occupied_sync_dirs`, `check_first_sync`, `BaseDirCheck.is_empty`). Seit 2026-10-08 zählen als Semesterordner nur Namen genau `NN_semester` (`02_SEMESTER_alt` ist ein eigener Ordner des Nutzers)
+* Erster Sync (Index für diesen Uni Ordner leer) nur, wenn es im Uni Ordner keine `NN_semester` bzw. `_ohne_semester` Ordner mit Inhalt gibt, sonst Abbruch mit Hinweis (`sync.occupied_sync_dirs`, `check_first_sync`, `BaseDirCheck.is_empty`). Als Semesterordner zählen nur Namen genau `NN_semester` (ein Ordner wie `02_SEMESTER_alt` gehört dem Nutzer)
 * Kurse ohne Zuordnung bekommen beim Sync `NN_kursname` Ordner (`Mapper.suggest_courses`), gespeichert in der Config. Kurse derselben Veranstaltung ([V], [Ü], [T], Tut Gruppe) teilen sich einen Ordner
 * Der Index liegt pro Uni Ordner im Datenverzeichnis, lokale Pfade relativ zum Uni Ordner
+* Die GUI kann gegen `gui/fake_backend.py` entwickelt werden (siehe `GUI_KONTEXT.md`), `python -m ilias_sync` startet sie mit dem echten Backend (`backend.py`)
 
-**Erster echter Sync erledigt (2026-09-25)**: Config `base_dir` = `C:\Users\rafik\OneDrive\Uni_neu` (alte Config gesichert als `config_vor_Uni_neu.toml` im Config Verzeichnis). 282 Dateien, 4,0 GB, 0 Fehler; zweiter Lauf: nichts zu tun. Die Kurszuordnungen `NN_kursname` stehen jetzt in der Config.
-
-**Erster echter Sync auf dem Mac erledigt (2026-09-26)**: `base_dir` = `~/Downloads/Uni_neu` (außerhalb von OneDrive, alte Config gesichert als `config_vor_Uni_neu.toml` im Config Verzeichnis). 283 Dateien, 4,1 GB, 0 Fehler, 8 Minuten; zweiter Lauf: nichts zu tun (60 s, nur Crawl). In OneDrive und im echten `01_SEMESTER` wurde nichts geschrieben. Auffällig, aber gewollt: Doppelpunkte in ILIAS Namen werden zu `_` (Windows), Videos in `NN_Videos` Unterordnern.
-
-Nächste Schritte Backend:
-* ~~Echte `api.Api`~~: fertig (2026-09-26, `backend.py`), alle Methoden aus GUI_KONTEXT.md 3.3, live gegen ILIAS getestet (Session, Kurse, Zuordnung). `python -m ilias_sync` ohne Argumente startet die App mit dem echten Backend. Autostart (`platform_utils`: LaunchAgent bzw. Registry) ist dabei
-* Als Nächstes: GUI mit echtem Backend durchspielen (Wizard, erster Sync in neuen Ordner auf dem Mac), dann Builds
-
-Ausnahme: Die GUI (Meilenstein 6) kann parallel von einem eigenen Agenten gegen `gui/fake_backend.py` entwickelt werden (siehe `GUI_KONTEXT.md`). `api.py` entsteht schrittweise mit den Backend Meilensteinen und ersetzt dann die Attrappe.
 
 ## Tests
 
