@@ -173,8 +173,6 @@ macOS App bauen (Ergebnis `ILIAS Sync.app`, ad hoc signiert):
 
 Die GUI (`ilias_sync/gui/`) spricht nur über `api.py` mit dem Backend, kein Backend Modul importiert Qt. Details in `CLAUDE.md` und `GUI_KONTEXT.md`.
 
-**Geplant**: Windows Build (`.exe`), DMG zur Weitergabe.
-
 ## Rechtliches
 
 ILIAS darf laut Universität Mannheim nur für Wissenschaft und Lehre genutzt werden, die Materialien sind urheberrechtlich geschützt. Das Tool ist nur für den persönlichen Gebrauch, lädt nur Inhalte, auf die der angemeldete Nutzer ohnehin Zugriff hat, und gibt nichts weiter. Kein offizielles Projekt der Universität Mannheim oder von ILIAS.
