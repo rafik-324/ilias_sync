@@ -1,5 +1,7 @@
 """
-App Icons für den Build aus ilias_sync/gui/assets/app_icon.svg erzeugen.
+App Icons für den Build erzeugen: ab 32 px aus ilias_sync/gui/assets/app_icon_schloss.png
+(Glyph vor dem Mannheimer Schloss, 1024 px), darunter aus app_icon.svg (nur Glyph, das Schloss
+wäre dort nur Rauschen).
 
 Ergebnis unter packaging/icons/ (wird committet, der Build braucht dieses Skript nicht):
   png/app_icon_<N>.png   16 bis 1024, randlos wie im Design
@@ -29,6 +31,8 @@ from PySide6.QtSvg import QSvgRenderer  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 SVG = ROOT / "ilias_sync" / "gui" / "assets" / "app_icon.svg"
+SCHLOSS = ROOT / "ilias_sync" / "gui" / "assets" / "app_icon_schloss.png"
+SCHLOSS_MIN = 32
 OUT = ROOT / "packaging" / "icons"
 
 PNG_SIZES = (16, 32, 48, 64, 128, 256, 512, 1024)
@@ -52,7 +56,14 @@ def render(size: int, content: float = 1.0) -> QImage:
     p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
     inner = size * content
     offset = (size - inner) / 2
-    QSvgRenderer(str(SVG)).render(p, QRectF(offset, offset, inner, inner))
+    target = QRectF(offset, offset, inner, inner)
+    if inner >= SCHLOSS_MIN:
+        n = round(inner)   # vorher glatt verkleinern, drawImage allein wirkt bei kleinen Größen pixelig
+        img_s = QImage(str(SCHLOSS)).scaled(n, n, Qt.AspectRatioMode.KeepAspectRatio,
+                                            Qt.TransformationMode.SmoothTransformation)
+        p.drawImage(QRectF(offset, offset, n, n), img_s)
+    else:
+        QSvgRenderer(str(SVG)).render(p, target)
     p.end()
     return img
 

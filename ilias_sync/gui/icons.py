@@ -25,7 +25,11 @@ IS_MAC = sys.platform == "darwin"
 
 # Liegt im PyInstaller Bundle unter ilias_sync/gui/assets, __file__ zeigt dort hinein
 ASSETS = Path(__file__).resolve().parent / "assets"
-ASSET_FILES = ("icon_light.svg", "icon_dark.svg", "app_icon.svg", "app_icon_dark.svg")
+ASSET_FILES = ("icon_light.svg", "icon_dark.svg", "app_icon.svg", "app_icon_dark.svg",
+               "app_icon_schloss.png", "app_icon_schloss_dark.png")
+# App Icon 5a: Glyph vor dem Mannheimer Schloss (fertig gerendert, 1024 px). Unter 32 px
+# wird das Schloss zu Rauschen, dort nur der Glyph (Vorgabe aus dem Handoff)
+SCHLOSS_MIN = 32
 
 # Design Tokens aus dem Handoff (nur Logo und Akzent)
 BLAU = "#2F5BD8"
@@ -78,11 +82,16 @@ def _render_svg(name: str, width: int, height: int) -> QPixmap:
 
 @lru_cache(maxsize=None)
 def app_icon(dark: bool = False) -> QIcon:
-    """App Icon (Quadrat mit Glyph) für Fenster, Dialoge und QApplication."""
-    name = "app_icon_dark.svg" if dark else "app_icon.svg"
+    """App Icon für Fenster, Dialoge, QApplication und Dock: ab 32 px mit Schloss, darunter nur der Glyph."""
+    svg = "app_icon_dark.svg" if dark else "app_icon.svg"
+    schloss = QPixmap(str(asset_path("app_icon_schloss_dark.png" if dark else "app_icon_schloss.png")))
     icon = QIcon()
-    for size in (16, 24, 32, 48, 64, 128, 256, 512):
-        icon.addPixmap(_render_svg(name, size, size))
+    for size in (16, 24, 32, 48, 64, 128, 256, 512, 1024):
+        if size < SCHLOSS_MIN or schloss.isNull():
+            icon.addPixmap(_render_svg(svg, size, size))
+        else:
+            icon.addPixmap(schloss.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio,
+                                          Qt.TransformationMode.SmoothTransformation))
     return icon
 
 
