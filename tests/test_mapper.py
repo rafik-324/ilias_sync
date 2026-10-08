@@ -552,3 +552,16 @@ def test_course_without_semester_can_be_switched_off(tmp_path):
         assert sync.plan(mapping, st, tmp_path, cfg) == []
         course.download_files = True
         assert [j.target.name for j in sync.plan(mapping, st, tmp_path, cfg)] == ["matlab.pdf"]
+
+
+def test_umbenannter_semesterordner_wird_wiedergefunden(tmp_path):
+    """Config sagt 01_semester, der Nutzer hat den Ordner in 01_SEMESTER umbenannt."""
+    (tmp_path / "01_SEMESTER" / "01_marketing").mkdir(parents=True)
+    c = crs(1, "Marketing (HWS 2026)")
+    result = CrawlResult([c], {c.ref_id: tree(c, [("file", "Skript.pdf", 2)])})
+    cfg = Config(base_dir=None, semesters={"HWS 2026": "01_semester"},
+                 courses=[CourseConfig(ref_id=1, ilias_name=c.name, local_dir="01_marketing")])
+    m = mapper.Mapper(cfg, tmp_path)
+    assert m.semester_dirs(result) == {"HWS 2026": "01_SEMESTER"}
+    [item] = m.map_crawl(result).items
+    assert item.rel_path[0] == "01_SEMESTER"

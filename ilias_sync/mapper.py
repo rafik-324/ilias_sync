@@ -431,7 +431,11 @@ class Mapper:
     def semester_dirs(self, result: CrawlResult) -> dict[str, str]:
         found = {s for c in result.courses if (s := course_semester(c))}
         existing = [d for d in self.tree.subdirs(()) if SEMESTER_DIR_RE.match(d)]
-        return assign_semesters(sorted(found), dict(self.cfg.semesters), existing)
+        # Vom Nutzer umbenannte Semesterordner (nur Schreibweise, z. B. 01_semester -> 01_SEMESTER)
+        # wiederfinden, sonst entstünde auf Dateisystemen mit Groß/Kleinschreibung ein zweiter Ordner
+        by_key = {nfc(d).casefold(): d for d in existing}
+        configured = {sem: by_key.get(nfc(folder).casefold(), folder) for sem, folder in self.cfg.semesters.items()}
+        return assign_semesters(sorted(found), configured, existing)
 
     def suggest_courses(self, result: CrawlResult) -> list[CourseConfig]:
         """Neue Kursordner NN_kursname für Kurse ohne Config Eintrag und ohne passenden
