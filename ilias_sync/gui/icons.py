@@ -5,9 +5,10 @@ Logo (Richtung 1b aus dem Design Handoff): das "i" als Download Symbol, Punkt ob
 Stamm als Pfeil nach unten. Die finalen SVGs liegen in ``assets/`` und werden für
 App Icon und Logo in der Seitenleiste direkt gerendert. Das Tray Icon zeichnet
 denselben Glyph per QPainter nach (Geometrie aus der README, viewBox 48 × 72),
-weil es Zustände (Badge) und eine Pfeil Animation beim Sync braucht. Auf macOS ist es
-das einfarbige Menüleisten Icon aus dem zweiten Handoff (Rahmen, Schloss Linien, dünner
-Glyph) als Template Image, auf Windows der farbige Glyph.
+weil es Zustände (Badge), eine Pfeil Animation beim Sync und auf macOS ein
+einfarbiges Template Image (setIsMask) braucht, das das System an hell und
+dunkel anpasst (Wunsch des Nutzers 2026-10-08: nur der Pfeil, ohne Rahmen und
+Schloss). Auf Windows werden die farbigen Varianten verwendet.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QGuiApplication, QIcon, QImage, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QBrush, QColor, QGuiApplication, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 
 IS_MAC = sys.platform == "darwin"
@@ -26,7 +27,7 @@ IS_MAC = sys.platform == "darwin"
 # Liegt im PyInstaller Bundle unter ilias_sync/gui/assets, __file__ zeigt dort hinein
 ASSETS = Path(__file__).resolve().parent / "assets"
 ASSET_FILES = ("icon_light.svg", "icon_dark.svg", "app_icon.svg", "app_icon_dark.svg",
-               "app_icon_schloss.png", "app_icon_schloss_dark.png", "schloss_lines_black.png")
+               "app_icon_schloss.png", "app_icon_schloss_dark.png")
 # App Icon 5a: Glyph vor dem Mannheimer Schloss (fertig gerendert, 1024 px). Unter 32 px
 # wird das Schloss zu Rauschen, dort nur der Glyph (Vorgabe aus dem Handoff)
 SCHLOSS_MIN = 32
@@ -42,11 +43,9 @@ FARBE_LOGIN = QColor("#e8912d")
 FARBE_PAUSE = QColor("#7a7a7a")
 FARBE_PAUSE_DUNKEL = QColor("#b4b4b8")   # auf dunklem Infobereich sonst kaum sichtbar
 
-# Pfeil Animation: 10 Bilder je Zyklus. Windows 900 ms (Logo Handoff), macOS Menüleiste
-# 1100 ms (Menüleisten Handoff)
+# Pfeil Animation: 900 ms Zyklus laut README, 10 Bilder zu je 90 ms
 SYNC_FRAMES = 10
-SYNC_FRAME_MS = 110 if IS_MAC else 90
-FARBE_FEHLER_MAC = QColor("#FF453A")
+SYNC_FRAME_MS = 90
 _SIZES = (16, 18, 20, 22, 24, 32, 36, 44, 48, 64)
 
 
@@ -202,95 +201,6 @@ def _draw_badge(p: QPainter, size: int, state: IconState, fill: QColor) -> None:
         p.drawRoundedRect(QRectF(center.x() + r * 0.23, center.y() - bh / 2, bw, bh), bw / 3, bw / 3)
 
 
-@lru_cache(maxsize=None)
-def _schloss_lines(width: int) -> QImage:
-    """Schloss Linien (schwarz), vorher glatt verkleinert, sonst wirken sie pixelig."""
-    img = QImage(str(asset_path("schloss_lines_black.png")))
-    return img.scaledToWidth(max(1, width), Qt.TransformationMode.SmoothTransformation)
-
-
-def _render_menubar(size: int, state: IconState, frame: int, animate: bool, color: QColor) -> QPixmap:
-    """macOS Menüleiste (Menüleisten Handoff): Rahmen, Schloss Linien, dünner Glyph, einfarbig.
-    S = Kantenlänge, I = Innenfläche. Zustände als Zeichen oben rechts: Fehler roter Punkt,
-    Login Ring, Pause zwei Balken."""
-    pm = QPixmap(size, size)
-    pm.fill(Qt.GlobalColor.transparent)
-    p = QPainter(pm)
-    p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-    border = max(1.0, 0.035 * size)
-    inner = size - 2 * border
-    # Rahmen
-    p.setPen(QPen(color, border))
-    p.setBrush(Qt.BrushStyle.NoBrush)
-    half = border / 2
-    p.drawRoundedRect(QRectF(half, half, size - border, size - border), 0.25 * size, 0.25 * size)
-    # Innenfläche: Schloss und Glyph, am Rahmen beschnitten
-    clip = QPainterPath()
-    clip.addRoundedRect(QRectF(border, border, inner, inner), 0.25 * size - border, 0.25 * size - border)
-    p.save()
-    p.setClipPath(clip)
-    p.translate(border, border)
-    lines = _schloss_lines(round(1.875 * inner))
-    if color != QColor(Qt.GlobalColor.black):
-        lines = lines.copy()
-        lp = QPainter(lines)
-        lp.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-        lp.fillRect(lines.rect(), color)
-        lp.end()
-    p.setOpacity(0.85)
-    p.drawImage(QPointF(-0.461 * inner, 0.4375 * inner), lines)
-    p.setOpacity(1.0)
-    arrow_y, arrow_op = 0.0, 1.0
-    if state == IconState.SYNCING:
-        arrow_y, arrow_op, _ = sync_pose(frame) if animate else STATIC_SYNC_POSE
-    scale = 0.344 * inner / 48
-    p.translate(0.328 * inner, 0.234 * inner)
-    p.scale(scale, scale)
-    p.setPen(Qt.PenStyle.NoPen)
-    p.setBrush(color)
-    p.drawEllipse(QPointF(24, 10), 5.5, 5.5)
-    if arrow_op > 0.01:
-        c = QColor(color)
-        c.setAlphaF(c.alphaF() * arrow_op)
-        p.setPen(QPen(c, 4.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        path = QPainterPath()
-        path.moveTo(24, 26 + arrow_y)
-        path.lineTo(24, 60 + arrow_y)
-        path.moveTo(13, 49 + arrow_y)
-        path.lineTo(24, 60 + arrow_y)
-        path.lineTo(35, 49 + arrow_y)
-        p.drawPath(path)
-    p.restore()
-    if state in (IconState.ERROR, IconState.LOGIN, IconState.PAUSED):
-        center = QPointF(size * 0.80, size * 0.20)
-        r = size * 0.17
-        p.save()   # Icon um das Zeichen freistellen
-        p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QBrush(Qt.GlobalColor.black))
-        p.drawEllipse(center, r + size * 0.07, r + size * 0.07)
-        p.restore()
-        if state == IconState.ERROR:
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(FARBE_FEHLER_MAC)
-            p.drawEllipse(center, r, r)
-        elif state == IconState.LOGIN:
-            w = max(1.2, size * 0.08)
-            p.setPen(QPen(color, w))
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawEllipse(center, r - w / 2, r - w / 2)
-        else:
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(color)
-            bw, bh = r * 0.62, r * 1.9
-            p.drawRoundedRect(QRectF(center.x() - r * 0.85, center.y() - bh / 2, bw, bh), bw / 3, bw / 3)
-            p.drawRoundedRect(QRectF(center.x() + r * 0.23, center.y() - bh / 2, bw, bh), bw / 3, bw / 3)
-    p.end()
-    return pm
-
-
 def _render(size: int, state: IconState, frame: int, template: bool, dark: bool, animate: bool) -> QPixmap:
     pm = QPixmap(size, size)
     pm.fill(Qt.GlobalColor.transparent)
@@ -329,26 +239,18 @@ def _render(size: int, state: IconState, frame: int, template: bool, dark: bool,
 
 
 @lru_cache(maxsize=None)
-def _tray_icon_cached(state: IconState, frame: int, mac: bool, dark: bool, animate: bool) -> QIcon:
+def _tray_icon_cached(state: IconState, frame: int, template: bool, dark: bool, animate: bool) -> QIcon:
     icon = QIcon()
-    if mac:
-        # Template Image (macOS färbt passend zur Menüleiste). Mit rotem Fehlerpunkt geht das
-        # nicht, dann farbig: weiß im dunklen, schwarz im hellen Modus
-        template = state != IconState.ERROR
-        color = QColor(Qt.GlobalColor.white) if dark and not template else QColor(Qt.GlobalColor.black)
-        for size in (16, 18, 22, 32, 36, 44):
-            icon.addPixmap(_render_menubar(size, state, frame, animate, color))
-        icon.setIsMask(template)
-        return icon
     for size in _SIZES:
-        icon.addPixmap(_render(size, state, frame, False, dark, animate))
+        icon.addPixmap(_render(size, state, frame, template, dark, animate))
+    if template:
+        icon.setIsMask(True)
     return icon
 
 
 def tray_icon(state: IconState, frame: int = 0, dark: bool | None = None, animate: bool = True) -> QIcon:
-    """Icon für Tray bzw. Menüleiste. macOS: Menüleisten Icon mit Rahmen und Schloss als
-    Template Image, Windows: farbiger Glyph. Bilder werden zwischengespeichert, damit die
-    Animation keine Dauerlast erzeugt."""
+    """Icon für Tray bzw. Menüleiste im Stil der Plattform. Bilder werden zwischengespeichert,
+    damit die Animation keine Dauerlast erzeugt."""
     if dark is None:
         dark = is_dark_mode()
     return _tray_icon_cached(state, frame % SYNC_FRAMES, IS_MAC, dark, animate)
