@@ -3,9 +3,15 @@
 # Bauen (aus dem Projektordner, Ausgabe außerhalb von OneDrive):
 #   ~/.venvs/ilias-sync/bin/pyinstaller packaging/ilias_sync_macos.spec --noconfirm \
 #       --distpath ~/dev/ilias_sync-build/dist --workpath ~/dev/ilias_sync-build/build
+#
+# Signatur: Gibt es im Schlüsselbund das selbst erstellte Zertifikat "ILIAS Sync Lokal"
+# (oder das in ILIAS_SYNC_SIGN_ID genannte), wird die App damit signiert. Dann bleibt die
+# Code Identität über alle Builds gleich, und "Immer erlauben" für das Passwort im
+# Schlüsselbund gilt auch nach Updates. Ohne Zertifikat: ad hoc Signatur wie bisher.
 # ruff: noqa
 
 import os
+import subprocess
 import sys
 
 from PyInstaller.utils.hooks import collect_submodules, copy_metadata
@@ -63,3 +69,15 @@ app = BUNDLE(
         "LSMinimumSystemVersion": "12.0",
     },
 )
+
+
+# ---------------- Stabile Signatur ----------------
+
+SIGN_ID = os.environ.get("ILIAS_SYNC_SIGN_ID", "ILIAS Sync Lokal")
+APP_PATH = os.path.join(DISTPATH, f"{APP_NAME}.app")
+if subprocess.run(["security", "find-certificate", "-c", SIGN_ID], capture_output=True).returncode == 0:
+    subprocess.run(["codesign", "--force", "--deep", "--sign", SIGN_ID, APP_PATH], check=True)
+    print(f"App signiert mit Zertifikat: {SIGN_ID}")
+else:
+    print(f"Zertifikat {SIGN_ID!r} nicht gefunden, App bleibt ad hoc signiert "
+          "(Schlüsselbund fragt nach jedem Build erneut)")
