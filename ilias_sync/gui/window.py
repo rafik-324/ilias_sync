@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 from ilias_sync import __version__
 from ilias_sync.gui import logic, theme
 from ilias_sync.gui.controller import Controller
-from ilias_sync.gui.icons import IconState, app_icon, brand_pixmap, dot, nav_icon
+from ilias_sync.gui.icons import IconState, app_icon, brand_app_pixmap, dot, nav_icon
 from ilias_sync.gui.macos import activate_app
 from ilias_sync.gui.tab_courses import CoursesTab
 from ilias_sync.gui.tab_log import LogTab
@@ -96,9 +96,9 @@ class MainWindow(QMainWindow):
         brand = QHBoxLayout()
         brand.setContentsMargins(20, 0, 16, 0)
         brand.setSpacing(10)
-        # Logo: Glyph passend zum Farbmodus, Wortmarke in der App Schrift (keine Webfont)
+        # Logo: App Icon passend zum Farbmodus, Wortmarke in der App Schrift (keine Webfont)
         self.logo = QLabel()
-        self.logo.setPixmap(brand_pixmap(30))
+        self.logo.setPixmap(brand_app_pixmap(34))
         brand.addWidget(self.logo)
         name = QLabel("ilias sync")
         name.setObjectName("brand")
@@ -155,7 +155,7 @@ class MainWindow(QMainWindow):
             self.nav.item(i).setIcon(nav_icon(name, t.muted, t.accent))
 
     def _refresh_theme(self) -> None:
-        self.logo.setPixmap(brand_pixmap(30))
+        self.logo.setPixmap(brand_app_pixmap(34))
         self._update_nav_icons()
         self._refresh_status()
 

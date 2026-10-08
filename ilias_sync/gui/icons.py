@@ -106,6 +106,18 @@ def brand_pixmap(height: int, dark: bool | None = None) -> QPixmap:
     return pm
 
 
+def brand_app_pixmap(size: int, dark: bool | None = None) -> QPixmap:
+    """App Icon mit Schloss für die Seitenleiste (Wunsch des Nutzers 2026-10-08), scharf auf Retina."""
+    if dark is None:
+        dark = is_dark_mode()
+    ratio = 2
+    img = QPixmap(str(asset_path("app_icon_schloss_dark.png" if dark else "app_icon_schloss.png")))
+    pm = img.scaled(size * ratio, size * ratio, Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation)
+    pm.setDevicePixelRatio(ratio)
+    return pm
+
+
 # ---------------- Tray Glyph ----------------
 
 def _smooth(x: float) -> float:

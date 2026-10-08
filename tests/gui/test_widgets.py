@@ -530,6 +530,8 @@ def test_logo_assets_vorhanden_und_ladbar(qtbot):
     assert not icons.app_icon().isNull() and not icons.app_icon(dark=True).isNull()
     assert not icons.brand_pixmap(30, dark=False).isNull()
     assert not icons.brand_pixmap(30, dark=True).isNull()
+    assert not icons.brand_app_pixmap(34, dark=False).isNull()
+    assert not icons.brand_app_pixmap(34, dark=True).isNull()
     for state in IconState:
         for frame in range(icons.SYNC_FRAMES):
             assert not icons.tray_icon(state, frame, dark=False).isNull()
