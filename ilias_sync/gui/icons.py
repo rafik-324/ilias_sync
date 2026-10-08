@@ -5,9 +5,9 @@ Logo (Richtung 1b aus dem Design Handoff): das "i" als Download Symbol, Punkt ob
 Stamm als Pfeil nach unten. Die finalen SVGs liegen in ``assets/`` und werden für
 App Icon und Logo in der Seitenleiste direkt gerendert. Das Tray Icon zeichnet
 denselben Glyph per QPainter nach (Geometrie aus der README, viewBox 48 × 72),
-weil es Zustände (Badge), eine Pfeil Animation beim Sync und auf macOS ein
-einfarbiges Template Image (setIsMask) braucht, das das System an hell und
-dunkel anpasst. Auf Windows werden die farbigen Varianten verwendet.
+weil es Zustände (Badge) und eine Pfeil Animation beim Sync braucht. Auf macOS sieht
+es aus wie das App Icon (Quadrat mit Schloss, Wunsch des Nutzers 2026-10-08), auf
+Windows wird der farbige Glyph verwendet.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QGuiApplication, QIcon, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QBrush, QColor, QGuiApplication, QIcon, QImage, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 
 IS_MAC = sys.platform == "darwin"
@@ -26,7 +26,7 @@ IS_MAC = sys.platform == "darwin"
 # Liegt im PyInstaller Bundle unter ilias_sync/gui/assets, __file__ zeigt dort hinein
 ASSETS = Path(__file__).resolve().parent / "assets"
 ASSET_FILES = ("icon_light.svg", "icon_dark.svg", "app_icon.svg", "app_icon_dark.svg",
-               "app_icon_schloss.png", "app_icon_schloss_dark.png")
+               "app_icon_schloss.png", "app_icon_schloss_dark.png", "schloss_lines.png", "schloss_lines_dark.png")
 # App Icon 5a: Glyph vor dem Mannheimer Schloss (fertig gerendert, 1024 px). Unter 32 px
 # wird das Schloss zu Rauschen, dort nur der Glyph (Vorgabe aus dem Handoff)
 SCHLOSS_MIN = 32
@@ -188,6 +188,47 @@ def _draw_badge(p: QPainter, size: int, state: IconState, fill: QColor) -> None:
         p.drawRoundedRect(QRectF(center.x() + r * 0.23, center.y() - bh / 2, bw, bh), bw / 3, bw / 3)
 
 
+@lru_cache(maxsize=None)
+def _schloss_lines(dark: bool, width: int) -> QImage:
+    """Schloss Linien, vorher glatt verkleinert (drawImage allein wirkt bei kleinen Größen pixelig)."""
+    img = QImage(str(asset_path("schloss_lines_dark.png" if dark else "schloss_lines.png")))
+    return img.scaledToWidth(width, Qt.TransformationMode.SmoothTransformation)
+
+
+def _render_app_style(size: int, state: IconState, frame: int, dark: bool, animate: bool) -> QPixmap:
+    """Menüleiste im Stil des App Icons (Wunsch des Nutzers 2026-10-08): abgerundetes Quadrat,
+    Schloss Linien, farbiger Glyph. Maße laut Handoff relativ zu 128 × 128."""
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+    u = size / 128
+    square = QPainterPath()
+    square.addRoundedRect(QRectF(0, 0, size, size), 32 * u, 32 * u)
+    p.save()
+    p.setClipPath(square)   # Pfeil der Animation und Schloss werden am Rand abgeschnitten
+    p.fillPath(square, QColor(INK) if dark else QColor(WEISS))
+    if size >= 24:          # darunter wären die Linien nur Rauschen
+        p.setOpacity(0.40 if dark else 0.45)
+        p.drawImage(QPointF(-56 * u, 46 * u), _schloss_lines(dark, round(240 * u)))
+        p.setOpacity(1.0)
+    pose = (0.0, 1.0, 0.0)
+    if state == IconState.SYNCING:
+        pose = sync_pose(frame) if animate else STATIC_SYNC_POSE
+    p.translate(42 * u, 22 * u)
+    p.scale(44 * u / 48, 66 * u / 72)
+    dot, arrow = (QColor(BLAU_HELL), QColor(WEISS)) if dark else (QColor(BLAU), QColor(INK))
+    _draw_glyph(p, dot, arrow, pose)
+    p.restore()
+    if state in (IconState.ERROR, IconState.LOGIN, IconState.PAUSED):
+        pause = FARBE_PAUSE_DUNKEL if dark else FARBE_PAUSE
+        fill = {IconState.ERROR: FARBE_FEHLER, IconState.LOGIN: FARBE_LOGIN, IconState.PAUSED: pause}[state]
+        _draw_badge(p, size, state, fill)
+    p.end()
+    return pm
+
+
 def _render(size: int, state: IconState, frame: int, template: bool, dark: bool, animate: bool) -> QPixmap:
     pm = QPixmap(size, size)
     pm.fill(Qt.GlobalColor.transparent)
@@ -226,18 +267,20 @@ def _render(size: int, state: IconState, frame: int, template: bool, dark: bool,
 
 
 @lru_cache(maxsize=None)
-def _tray_icon_cached(state: IconState, frame: int, template: bool, dark: bool, animate: bool) -> QIcon:
+def _tray_icon_cached(state: IconState, frame: int, app_style: bool, dark: bool, animate: bool) -> QIcon:
     icon = QIcon()
     for size in _SIZES:
-        icon.addPixmap(_render(size, state, frame, template, dark, animate))
-    if template:
-        icon.setIsMask(True)
+        if app_style:
+            icon.addPixmap(_render_app_style(size, state, frame, dark, animate))
+        else:
+            icon.addPixmap(_render(size, state, frame, False, dark, animate))
     return icon
 
 
 def tray_icon(state: IconState, frame: int = 0, dark: bool | None = None, animate: bool = True) -> QIcon:
-    """Icon für Tray bzw. Menüleiste im Stil der Plattform. Bilder werden zwischengespeichert,
-    damit die Animation keine Dauerlast erzeugt."""
+    """Icon für Tray bzw. Menüleiste. macOS: im Stil des App Icons (farbig, kein Template Image),
+    Windows: farbiger Glyph. Bilder werden zwischengespeichert, damit die Animation keine
+    Dauerlast erzeugt."""
     if dark is None:
         dark = is_dark_mode()
     return _tray_icon_cached(state, frame % SYNC_FRAMES, IS_MAC, dark, animate)
