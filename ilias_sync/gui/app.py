@@ -16,16 +16,16 @@ import logging
 import sys
 from logging.handlers import RotatingFileHandler
 
-from PySide6.QtCore import QCoreApplication, QEvent, QObject, QTimer
+from PySide6.QtCore import QCoreApplication, QTimer
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
-from PySide6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon, QWidget
+from PySide6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
 
 from ilias_sync import __version__
 from ilias_sync.api import home_override
 from ilias_sync.gui import theme
 from ilias_sync.gui.controller import Controller
 from ilias_sync.gui.icons import app_icon
-from ilias_sync.gui.macos import activate_app, hide_dock_icon, show_dock_icon
+from ilias_sync.gui.macos import activate_app, hide_dock_icon
 from ilias_sync.gui.scheduler_gui import Scheduler
 from ilias_sync.gui.setup_wizard import SetupWizard
 from ilias_sync.gui.tray import ZIEL_UEBERSICHT, Tray
@@ -100,47 +100,6 @@ class SingleInstance:
         self._on_wake()
 
 
-class DockIcon(QObject):
-    """macOS: Dock Icon nur, solange Hauptfenster oder Wizard sichtbar ist."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._windows: list[QWidget] = []
-        self.visible = False
-
-    def watch(self, widget: QWidget) -> None:
-        if widget not in self._windows:
-            self._windows.append(widget)
-            widget.installEventFilter(self)
-            widget.destroyed.connect(lambda *_: self._forget(widget))
-            if widget.isVisible():
-                self._update()
-
-    def _forget(self, widget: QWidget) -> None:
-        if widget in self._windows:
-            self._windows.remove(widget)
-        QTimer.singleShot(0, self._update)
-
-    def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802
-        if event.type() == QEvent.Type.Show:
-            self._update()
-        elif event.type() == QEvent.Type.Hide:
-            # erst nach dem Event prüfen, ob noch ein anderes Fenster offen ist
-            QTimer.singleShot(0, self._update)
-        return False
-
-    def _update(self) -> None:
-        want = any(w.isVisible() for w in self._windows)
-        if want == self.visible:
-            return
-        self.visible = want
-        if want:
-            show_dock_icon()
-            activate_app()
-        else:
-            hide_dock_icon()
-
-
 class GuiApp:
     """Verbindet Controller, Tray, Fenster, Scheduler und Wizard."""
 
@@ -153,7 +112,6 @@ class GuiApp:
         self.wizard: SetupWizard | None = None
         self._login_dialog: LoginDialog | None = None
         self._quitting = False
-        self.dock = DockIcon()
 
         self.tray.open_window.connect(self.show_window)
         self.tray.open_login.connect(self.show_login)
@@ -178,7 +136,6 @@ class GuiApp:
     def _ensure_window(self) -> MainWindow:
         if self.window is None:
             self.window = MainWindow(self.controller)
-            self.dock.watch(self.window)
             self.window.login_requested.connect(self.show_login)
             self.window.quit_requested.connect(self.quit)
         return self.window
@@ -201,7 +158,6 @@ class GuiApp:
 
     def show_wizard(self) -> None:
         self.wizard = SetupWizard(self.api)
-        self.dock.watch(self.wizard)
         self.wizard.accepted.connect(self._wizard_done)
         self.wizard.rejected.connect(self.quit)
         self.wizard.show()

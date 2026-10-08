@@ -1,11 +1,10 @@
 """
 macOS Besonderheiten über die Objective-C Laufzeit (ctypes, ohne Zusatzpakete).
 
-Im gebauten .app sorgt LSUIElement dafür, dass beim Start kein Dock Icon erscheint. Beim
+Im gebauten .app sorgt LSUIElement dafür, dass kein Dock Icon erscheint. Beim
 Start aus der Entwicklungsumgebung fehlt diese Angabe, deshalb wird dieselbe
-Einstellung hier zur Laufzeit gesetzt. Solange ein Fenster offen ist, zeigt die App
-ihr Icon im Dock (show_dock_icon), danach wieder nur die Menüleiste. Auf anderen
-Systemen tun die Funktionen nichts.
+Einstellung hier zur Laufzeit gesetzt. Auf anderen Systemen tun die Funktionen
+nichts.
 """
 
 from __future__ import annotations
@@ -19,8 +18,7 @@ log = logging.getLogger(__name__)
 
 IS_MAC = sys.platform == "darwin"
 
-# NSApplicationActivationPolicy: Regular = mit Dock Icon, Accessory = kein Dock Icon, kein App Menü
-_POLICY_REGULAR = 0
+# NSApplicationActivationPolicyAccessory: kein Dock Icon, kein App Menü
 _POLICY_ACCESSORY = 1
 
 _objc = None
@@ -63,17 +61,6 @@ def hide_dock_icon() -> None:
               restype=ctypes.c_bool, argtypes=(ctypes.c_long,))
     except Exception:  # noqa: BLE001
         log.warning("Dock Icon konnte nicht ausgeblendet werden", exc_info=True)
-
-
-def show_dock_icon() -> None:
-    """Dock Icon zeigen, solange ein Fenster offen ist (Wunsch des Nutzers 2026-10-08)."""
-    if not IS_MAC:
-        return
-    try:
-        _send(_ns_app(), "setActivationPolicy:", _POLICY_REGULAR,
-              restype=ctypes.c_bool, argtypes=(ctypes.c_long,))
-    except Exception:  # noqa: BLE001
-        log.warning("Dock Icon konnte nicht eingeblendet werden", exc_info=True)
 
 
 def activate_app() -> None:
