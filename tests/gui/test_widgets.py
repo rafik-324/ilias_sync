@@ -292,7 +292,7 @@ def test_wizard_basisordner_mit_inhalt_wird_abgelehnt(qtbot, fake_first_run, tmp
     page = BaseDirPage(fake_first_run)
     qtbot.addWidget(page)
     voll = tmp_path / "voll"
-    (voll / "01_SEMESTER").mkdir(parents=True)
+    (voll / "01_SEMESTER" / "01_marketing").mkdir(parents=True)
     page.path.setText(str(voll))
     page._run_check()
     assert not page.isComplete()

@@ -91,8 +91,8 @@ class BaseDirPage(QWizardPage):
         super().__init__()
         self.api = api
         self.setTitle("Uni Ordner festlegen")
-        self.setSubTitle("In diesem Ordner legt ILIAS Sync alle Unterordner selbst an. "
-                         "Der erste Sync braucht einen neuen oder leeren Ordner.")
+        self.setSubTitle("In diesem Ordner legt ILIAS Sync die Semesterordner selbst an. "
+                         "Andere Ordner darin bleiben unberührt.")
         self._check: BaseDirCheck | None = None
         try:
             self.root_name = api.load_config().root_folder_name
@@ -127,7 +127,8 @@ class BaseDirPage(QWizardPage):
         lay.addWidget(role_label("So wird es aussehen", "section"))
         lay.addWidget(self.structure)
         lay.addStretch(1)
-        lay.addWidget(hint_label("Ein Ordner, in dem schon Dateien liegen, wird nicht befüllt. "
+        lay.addWidget(hint_label("Semesterordner (01_semester ...), in denen schon Dateien liegen, werden "
+                                 "beim ersten Sync nicht befüllt. Deine übrigen Ordner fasst ILIAS Sync nie an. "
                                  "So kommt nichts mit deinen eigenen Unterlagen durcheinander. "
                                  "Der Ordner kann später in den Einstellungen geändert werden."))
 
@@ -176,14 +177,14 @@ class BaseDirPage(QWizardPage):
             self.status.setText("Der Ordner existiert noch nicht und wird nach Rückfrage angelegt.")
             theme.set_role(self.status, "warning")
         elif not c.is_empty:
-            where = f"einen Ordner {self.root_name}" if self.root_name else "diesen Ordner"
             self.status.setText(
-                f"Hier gibt es schon {where} mit Inhalt. Der erste Sync läuft nur in "
-                "einen neuen oder leeren Ordner. Bitte einen anderen Ordner wählen."
+                c.message or "Hier gibt es schon Semesterordner mit Inhalt. Der erste Sync braucht neue oder "
+                "leere Semesterordner. Bitte einen anderen Ordner wählen."
             )
             theme.set_role(self.status, "error")
         elif not self.root_name:
-            self.status.setText("Leerer Ordner. Er wird direkt als Uni Ordner verwendet.")
+            self.status.setText("Ordner ist nutzbar. Die Semesterordner werden darin angelegt, "
+                                "andere Ordner bleiben unberührt.")
             theme.set_role(self.status, "success")
         elif c.has_root_folder:
             self.status.setText(f"Leerer Ordner {self.root_name} gefunden. Er wird verwendet.")

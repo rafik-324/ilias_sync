@@ -262,8 +262,14 @@ def test_first_sync_needs_empty_root(env):
     assert sync.check_first_sync(st, root) is None          # gibt es noch nicht
     root.mkdir()
     assert sync.check_first_sync(st, root) is None          # leer
+    (root / "code_projects").mkdir()
+    (root / "02_SEMESTER_alt" / "alt.pdf").parent.mkdir()
+    (root / "02_SEMESTER_alt" / "alt.pdf").write_bytes(b"x")
+    assert sync.check_first_sync(st, root) is None          # andere Ordner des Nutzers stören nicht
     (root / "01_SEMESTER").mkdir()
-    assert "leeren" in sync.check_first_sync(st, root)      # fremder Inhalt
+    assert sync.check_first_sync(st, root) is None          # leerer Semesterordner auch nicht
+    (root / "01_SEMESTER" / "notiz.txt").write_bytes(b"x")
+    assert "01_SEMESTER" in sync.check_first_sync(st, root)  # Semesterordner mit Inhalt
     st.start_run(datetime.now())
     assert sync.check_first_sync(st, root) is None          # später: eigener Inhalt
 

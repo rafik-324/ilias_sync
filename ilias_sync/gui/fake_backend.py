@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import tempfile
 import threading
 import time
@@ -130,6 +131,15 @@ class _Item:
     ilias_path: str
     local_path: Path
     size: int
+
+
+def _occupied_sync_dirs(root: Path) -> list[str]:
+    """Wie sync.occupied_sync_dirs: NN_semester und _ohne_semester Ordner mit Inhalt."""
+    return sorted(
+        d.name for d in root.iterdir()
+        if d.is_dir() and (re.match(r"^\d+_semester$", d.name, re.IGNORECASE) or d.name.lower() == "_ohne_semester")
+        and any(c.name != ".DS_Store" for c in d.iterdir())
+    )
 
 
 class FakeApi:
@@ -382,7 +392,7 @@ class FakeApi:
         root = path / root_name
         has_root = root.is_dir()
         semesters = sorted(p.name for p in root.iterdir() if p.is_dir()) if has_root else []
-        is_empty = not has_root or not any(root.iterdir())
+        is_empty = not has_root or not _occupied_sync_dirs(root)
         message = None
         if not exists:
             message = "Der Ordner existiert nicht. Er kann angelegt werden."
@@ -484,14 +494,15 @@ class FakeApi:
         return self._plan(progress, cancel)
 
     def _check_first_sync(self) -> None:
-        """Wie das echte Backend: der erste Sync läuft nur in einen leeren oder neuen Uni Ordner."""
+        """Wie das echte Backend: der erste Sync braucht neue oder leere Semesterordner,
+        andere Ordner im Uni Ordner stören nicht."""
         if self._runs or self._config is None:
             return
         root = self._root()
-        if root.is_dir() and any(root.iterdir()):
+        if root.is_dir() and (occupied := _occupied_sync_dirs(root)):
             raise ConfigError(
-                f"Der Ordner {root} enthält schon Dateien. Der erste Sync läuft nur in einen leeren "
-                "oder neuen Uni Ordner. Bitte in den Einstellungen einen anderen Basisordner wählen."
+                f"In {root} gibt es schon {', '.join(occupied)} mit Inhalt. Der erste Sync braucht neue "
+                "oder leere Semesterordner. Bitte in den Einstellungen einen anderen Ordner wählen."
             )
 
     def sync(self, progress: ProgressCallback, cancel: threading.Event) -> SyncResult:

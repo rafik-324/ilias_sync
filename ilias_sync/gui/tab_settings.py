@@ -306,7 +306,7 @@ class SettingsTab(Page):
         if not check.is_empty:
             answer = QMessageBox.warning(
                 self, "Basisordner",
-                "Der Uni Ordner an dieser Stelle enthält schon Dateien. Hat ILIAS Sync ihn nicht selbst "
+                "Hier gibt es schon Semesterordner mit Dateien. Hat ILIAS Sync sie nicht selbst "
                 "befüllt, wird der erste Sync dorthin verweigert, damit nichts mit deinen eigenen Unterlagen "
                 "durcheinanderkommt.\n\nTrotzdem diesen Ordner wählen?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,

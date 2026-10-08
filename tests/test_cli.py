@@ -70,7 +70,7 @@ def test_test_target_must_not_be_inside_semester(tmp_path):
 
 def test_first_sync_refuses_non_empty_root_before_login(monkeypatch, tmp_path, capsys):
     root = tmp_path / "Uni"
-    (root / "01_SEMESTER").mkdir(parents=True)
+    (root / "01_SEMESTER" / "01_marketing").mkdir(parents=True)
     monkeypatch.setattr(cli, "load_config_or_report", lambda: Config(base_dir=tmp_path, root_folder_name="Uni"))
     monkeypatch.setattr(config, "data_dir", lambda: tmp_path / "daten")
 
@@ -80,4 +80,4 @@ def test_first_sync_refuses_non_empty_root_before_login(monkeypatch, tmp_path, c
     monkeypatch.setattr(cli, "open_session", no_login)
     for dry_run in (True, False):
         assert cli.cmd_sync(dry_run, None) == 1
-        assert "leeren" in capsys.readouterr().out
+        assert "Semesterordner" in capsys.readouterr().out

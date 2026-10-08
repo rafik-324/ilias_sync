@@ -228,7 +228,7 @@ class Api:
             except OSError:
                 entries = []
             semesters = sorted(e.name for e in entries if e.is_dir() and mapper.SEMESTER_DIR_RE.match(e.name))
-            is_empty = not entries
+            is_empty = not sync.occupied_sync_dirs(root)  # andere Ordner des Nutzers stören nicht
         message = None
         if path.exists() and not exists:
             message = "Das ist kein Ordner."
@@ -237,8 +237,8 @@ class Api:
         elif not writable:
             message = "In diesen Ordner darf nicht geschrieben werden."
         elif not is_empty:
-            message = (f"{root_name or 'Der Ordner'} enthält schon Dateien. Der erste Sync braucht einen leeren "
-                       "oder neuen Uni Ordner.")
+            message = (f"{root_name or 'Der Ordner'} enthält schon Semesterordner mit Dateien. Der erste Sync "
+                       "braucht neue oder leere Semesterordner.")
         return BaseDirCheck(exists, writable, has_root, semesters, message, is_empty)
 
     def create_base_structure(self, path: Path) -> None:

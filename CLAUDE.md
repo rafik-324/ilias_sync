@@ -384,7 +384,7 @@ Seitenleiste links mit diesen Seiten, Design folgt automatisch dem hellen oder d
 ### Setup Wizard (erster Start)
 
 1. Uni-ID + Passwort, Login testen
-2. **Basispfad einmalig festlegen**: Eingabefeld + "Durchsuchen" Button (nativer Ordnerdialog). Ab diesem Pfad erstellt das Tool alle Unterordner selbst (siehe Abschnitt "Ordneraufbau ab Basispfad"). Pfad wird geprüft (existiert, beschreibbar, Uni Ordner leer oder noch nicht vorhanden), fehlende Ordner werden nach Bestätigung angelegt. Der erste Sync läuft nur in einen leeren Uni Ordner, ein Uni Ordner mit Inhalt wird abgelehnt. Danach nur noch in den Einstellungen änderbar, mit Warnung und ohne Dateien zu verschieben
+2. **Basispfad einmalig festlegen**: Eingabefeld + "Durchsuchen" Button (nativer Ordnerdialog). Ab diesem Pfad erstellt das Tool alle Unterordner selbst (siehe Abschnitt "Ordneraufbau ab Basispfad"). Pfad wird geprüft (existiert, beschreibbar, Uni Ordner leer oder noch nicht vorhanden), fehlende Ordner werden nach Bestätigung angelegt. Der erste Sync verlangt nur, dass es noch keine Semesterordner (`NN_semester`) oder `_ohne_semester` mit Inhalt gibt, andere Ordner des Nutzers im Uni Ordner sind erlaubt und bleiben unberührt (Entscheidung des Nutzers 2026-10-08). Danach nur noch in den Einstellungen änderbar, mit Warnung und ohne Dateien zu verschieben
 3. Kurse abrufen. Ist der Basispfad leer: Struktur vorschlagen und anlegen. Enthält er schon Ordner: Zuordnung zu vorhandenen Kursordnern per Fuzzy Match vorschlagen. Nutzer bestätigt/korrigiert
 4. Dry Run anzeigen
 5. Erster echter Sync
@@ -429,7 +429,7 @@ Nach jedem Meilenstein lauffähig und getestet, bevor der nächste beginnt.
 **Stand (2026-09-25)**: Meilenstein 1 und 2 fertig, Crawler mit 3 parallelen Abrufen und automatischem Relogin. Meilenstein 4 (Mapper) vorgezogen und weitgehend fertig. Meilenstein 3 im CLI fertig: Status Index (`state.py`), `--dry-run` und `--sync` (`sync.py`). Seit 2026-09-26 (Mac): kein `_alt_` mehr, geänderte Dateien nur melden (`ilias_changed`, `sync.download_changed`, `State.dismiss_changed`), belegte Namen ohne Inhaltsvergleich als `_ilias_<Datum>` daneben. Alte Index Datenbanken bekommen die neuen Spalten beim Öffnen. Es fehlt noch die echte `api.Api` für die GUI. `--test-sync` bleibt für Tests. **Der echte `01_SEMESTER` wird nie beschrieben** (Vorgabe des Nutzers). GUI (Meilenstein 6) läuft parallel auf Branch `gui` gegen das Fake Backend.
 
 Entscheidung des Nutzers (2026-09-25): **Der erste echte Sync läuft in einen komplett neuen, leeren Basisordner** und lädt alles einmal herunter (auch Videos, auch den Lizenzkurs unter `_Ohne_Semester`). Die bisherigen eigenen Ordner bleiben unberührt, das Tool legt die Struktur selbst an. Umsetzung:
-* Erster Sync (Index für diesen Uni Ordner leer) nur, wenn der Uni Ordner fehlt oder leer ist, sonst Abbruch mit Hinweis (`sync.check_first_sync`, `BaseDirCheck.is_empty`)
+* Erster Sync (Index für diesen Uni Ordner leer) nur, wenn es im Uni Ordner keine `NN_semester` bzw. `_ohne_semester` Ordner mit Inhalt gibt, sonst Abbruch mit Hinweis (`sync.occupied_sync_dirs`, `check_first_sync`, `BaseDirCheck.is_empty`). Seit 2026-10-08 zählen als Semesterordner nur Namen genau `NN_semester` (`02_SEMESTER_alt` ist ein eigener Ordner des Nutzers)
 * Kurse ohne Zuordnung bekommen beim Sync `NN_kursname` Ordner (`Mapper.suggest_courses`), gespeichert in der Config. Kurse derselben Veranstaltung ([V], [Ü], [T], Tut Gruppe) teilen sich einen Ordner
 * Der Index liegt pro Uni Ordner im Datenverzeichnis, lokale Pfade relativ zum Uni Ordner
 

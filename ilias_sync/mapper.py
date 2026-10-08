@@ -67,7 +67,9 @@ TRANSPARENT_FOLDERS = {"dateien", "files", "materialien", "material", "unterlage
 FILLER_WORDS = {"und", "der", "die", "das", "zur", "zum", "fur", "alle", "grosse", "kleine"}
 ROMAN = {"i": "1", "ii": "2", "iii": "3", "iv": "4", "v": "5"}
 NUMBER_PREFIX_RE = re.compile(r"^\d{1,3}[a-z]?[\s_.\-]+", re.IGNORECASE)
-SEMESTER_DIR_RE = re.compile(r"^(\d+)_.*semester", re.IGNORECASE)
+# Nur genau NN_semester (beliebige Schreibweise). Eigene Ordner wie 02_SEMESTER_alt sind keine
+# Semesterordner, sonst würde der Sync hineinschreiben
+SEMESTER_DIR_RE = re.compile(r"^(\d+)_semester$", re.IGNORECASE)
 SEMESTER_WORD_RE = re.compile(r"\b(HWS|FSS)\s+(\d{4})\b")
 
 

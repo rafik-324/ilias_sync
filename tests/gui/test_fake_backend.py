@@ -164,7 +164,9 @@ def test_erster_sync_nur_in_leeren_uni_ordner(fake_first_run, tmp_path):
     from ilias_sync.api import ConfigError
 
     base = fake_first_run.workdir / "Uni"
-    (base / "01_Universität_Mannheim" / "eigene_Notizen").mkdir(parents=True)
+    (base / "eigene_Notizen").mkdir(parents=True)
+    assert fake_first_run.check_base_dir(base).is_empty     # andere Ordner stören nicht
+    (base / "01_semester" / "kurs").mkdir(parents=True)
     check = fake_first_run.check_base_dir(base)
     assert check.has_root_folder and not check.is_empty
     fake_first_run.create_base_structure(base)

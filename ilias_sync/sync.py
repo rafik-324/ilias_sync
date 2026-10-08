@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import unicodedata
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -27,7 +28,7 @@ from pathlib import Path, PurePosixPath
 
 import requests
 
-from . import downloader
+from . import downloader, mapper
 from .api import (
     ActionKind, ChangedFile, Config, DownloadedFile, IliasCourse, ItemStatus, PlannedAction, Progress, SyncResult,
     SyncRun,
@@ -141,17 +142,37 @@ def unassigned_courses(mapping: MappingResult) -> list[CourseMapping]:
     return [cm for cm in mapping.courses if cm.source == "neu"]
 
 
+def occupied_sync_dirs(root: Path) -> list[str]:
+    """Ordner im Uni Ordner, in die der Sync schreiben würde (NN_semester, _ohne_semester)
+    und die schon Inhalt haben. Andere Ordner des Nutzers zählen nicht, sie werden nie angefasst."""
+    try:
+        entries = list(root.iterdir())
+    except OSError:
+        return []
+    occupied = []
+    for e in entries:
+        name = unicodedata.normalize("NFC", e.name)
+        if not e.is_dir() or not (mapper.SEMESTER_DIR_RE.match(name) or name.lower() == mapper.NO_SEMESTER_DIR):
+            continue
+        try:
+            if any(c.name != ".DS_Store" for c in e.iterdir()):
+                occupied.append(name)
+        except OSError:
+            occupied.append(name)
+    return sorted(occupied)
+
+
 def check_first_sync(st: State, root: Path) -> str | None:
-    """Fehlertext, wenn der erste Sync in einen Ordner mit fremdem Inhalt laufen würde.
-    Der erste Sync lädt alles einmal und legt die Struktur selbst an, dafür muss der
-    Uni Ordner neu oder leer sein."""
+    """Fehlertext, wenn der erste Sync in Ordner mit fremdem Inhalt laufen würde.
+    Der erste Sync lädt alles einmal und legt Semesterordner und _ohne_semester selbst an,
+    diese dürfen daher noch nicht mit Inhalt existieren. Andere Ordner im Uni Ordner stören nicht."""
     if not st.is_empty() or not root.exists():
         return None
     if not root.is_dir():
         return f"{root} ist kein Ordner."
-    if any(root.iterdir()):
-        return (f"Der erste Sync braucht einen leeren oder neuen Uni Ordner, {root} enthält schon Dateien. "
-                "Bitte in der Config einen anderen Basisordner (general.base_dir) wählen.")
+    if occupied := occupied_sync_dirs(root):
+        return (f"Der erste Sync braucht neue oder leere Semesterordner, in {root} gibt es schon "
+                f"{', '.join(occupied)} mit Inhalt. Bitte einen anderen Uni Ordner wählen.")
     return None
 
 

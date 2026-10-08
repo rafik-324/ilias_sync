@@ -175,11 +175,14 @@ def test_check_base_dir(env):
     (root / ".DS_Store").write_bytes(b"")
     assert api.check_base_dir(base).is_empty
     (root / "01_SEMESTER").mkdir()
-    (root / "notizen").mkdir()
+    (root / "notizen" / "x.txt").parent.mkdir()
+    (root / "notizen" / "x.txt").write_bytes(b"x")
+    assert api.check_base_dir(base).is_empty                # eigene Ordner und leere Semesterordner sind ok
+    (root / "01_SEMESTER" / "01_marketing").mkdir()
     check = api.check_base_dir(base)
     assert check.has_root_folder and not check.is_empty
     assert check.existing_semesters == ["01_SEMESTER"]
-    assert "leeren" in check.message
+    assert "Semesterordner" in check.message
 
 
 def test_check_base_dir_mit_unterordner(env):
@@ -188,7 +191,7 @@ def test_check_base_dir_mit_unterordner(env):
     base.mkdir()
     check = api.check_base_dir(base)
     assert not check.has_root_folder and check.is_empty
-    (base / "01_Universität_Mannheim" / "01_SEMESTER").mkdir(parents=True)
+    (base / "01_Universität_Mannheim" / "01_SEMESTER" / "kurs").mkdir(parents=True)
     check = api.check_base_dir(base)
     assert check.has_root_folder and not check.is_empty
     assert "01_Universität_Mannheim" in check.message
@@ -307,7 +310,7 @@ def test_first_sync_into_existing_uni_folder_writes_nothing(env, monkeypatch):
         raise AssertionError("darf ILIAS nicht fragen")
 
     monkeypatch.setattr(api, "_logged_in_session", no_login)
-    with pytest.raises(ConfigError, match="leeren oder neuen Uni Ordner"):
+    with pytest.raises(ConfigError, match="neue oder leere Semesterordner"):
         api.sync(noop, threading.Event())
     assert snapshot(base) == before
     assert api._config_path.read_bytes() == config_before
