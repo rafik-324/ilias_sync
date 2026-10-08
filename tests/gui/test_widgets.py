@@ -820,3 +820,11 @@ def test_intervall_texte():
     assert logic.interval_text(60) == "stündlich"
     assert logic.interval_text(360) == "alle 6 Stunden"
     assert logic.interval_text(45) == "alle 45 Minuten"
+
+
+def test_wizard_autostart_standardmaessig_an(qtbot, fake_first_run):
+    wizard = SetupWizard(fake_first_run)
+    qtbot.addWidget(wizard)
+    assert wizard.autostart_requested()
+    wizard.finish_page.autostart.setChecked(False)
+    assert not wizard.autostart_requested()

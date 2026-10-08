@@ -23,6 +23,7 @@ def test_mac_autostart_on_and_off(mac):
     data = plistlib.loads(path.read_bytes())
     assert data["Label"] == "de.uni-mannheim.ilias-sync"
     assert data["RunAtLoad"] is True
+    assert data["KeepAlive"] == {"SuccessfulExit": False}  # nach Absturz neu starten, nach Beenden nicht
     assert data["ProgramArguments"] == [sys.executable, "-m", "ilias_sync"]
     assert pu.autostart_enabled()
     pu.set_autostart(True)   # zweimal an ist kein Fehler

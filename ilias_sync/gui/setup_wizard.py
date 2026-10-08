@@ -478,6 +478,9 @@ class FinishPage(QWizardPage):
         self.setSubTitle("ILIAS Sync läuft ab jetzt im Hintergrund.")
         self.start_now = QCheckBox("Synchronisierung jetzt starten")
         self.start_now.setChecked(True)
+        where = "in der Menüleiste" if sys.platform == "darwin" else "im Infobereich"
+        self.autostart = QCheckBox(f"Beim Anmelden am Computer starten, das Symbol bleibt immer {where}")
+        self.autostart.setChecked(True)
         lay = QVBoxLayout(self)
         info = QLabel(
             "Beim ersten Sync werden alle Materialien deiner Kurse geladen. Das kann je nach Anzahl "
@@ -488,6 +491,7 @@ class FinishPage(QWizardPage):
         lay.addWidget(info)
         lay.addSpacing(12)
         lay.addWidget(self.start_now)
+        lay.addWidget(self.autostart)
         lay.addStretch(1)
         where = "in der Menüleiste oben rechts" if sys.platform == "darwin" else "im Infobereich der Taskleiste"
         lay.addWidget(hint_label(f"Das Symbol von ILIAS Sync findest du {where}. "
@@ -549,6 +553,9 @@ class SetupWizard(QWizard):
 
     def start_sync_requested(self) -> bool:
         return self.finish_page.start_now.isChecked()
+
+    def autostart_requested(self) -> bool:
+        return self.finish_page.autostart.isChecked()
 
     def reject(self) -> None:
         answer = QMessageBox.question(

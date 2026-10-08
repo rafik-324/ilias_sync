@@ -166,7 +166,13 @@ class GuiApp:
 
     def _wizard_done(self) -> None:
         start = self.wizard.start_sync_requested() if self.wizard else False
+        autostart = self.wizard.autostart_requested() if self.wizard else False
         self.wizard = None
+        if autostart:
+            try:
+                self.api.set_autostart(True)
+            except Exception:  # noqa: BLE001, Autostart ist nicht entscheidend, in den Einstellungen nachholbar
+                log.exception("Autostart konnte nicht eingeschaltet werden")
         self.controller.logged_in()
         self._start_normal()
         self.show_window()

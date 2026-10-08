@@ -145,6 +145,9 @@ def set_autostart(enabled: bool) -> None:
                 "Label": AUTOSTART_LABEL,
                 "ProgramArguments": autostart_command(),
                 "RunAtLoad": True,
+                # nach einem Absturz neu starten, damit das Symbol in der Menüleiste bleibt.
+                # "Beenden" im Menü (Exit Code 0) bleibt beendet
+                "KeepAlive": {"SuccessfulExit": False},
                 "ProcessType": "Interactive",
             }
             tmp = path.with_name(path.name + ".part")
