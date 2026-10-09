@@ -381,6 +381,7 @@ Sync läuft immer in einem Worker Thread (`QThread`), die GUI blockiert nie.
 * **Windows**: `packaging/ilias_sync_windows.spec`, gleiche Startdatei. Bauen nach außerhalb von Cloud Ordnern:
   `python -m PyInstaller packaging\ilias_sync_windows.spec --noconfirm --distpath <ordner>\dist --workpath <ordner>\build`.
   Ergebnis Ordner `ILIAS Sync` mit `ILIAS Sync.exe` (onedir, ohne Konsolenfenster, etwa 126 MB, unsigniert). Geprüft: `--status` findet Config, Anmeldeinformationsverwaltung und Session. Autostart erst einschalten, wenn der Ordner an seinem endgültigen Ort liegt
+* **Windows Installer**: `packaging\make_installer.ps1 [-Out ORDNER]` baut die App und packt sie mit Inno Setup 6 (`packaging/ilias_sync_windows.iss`, `winget install --id JRSoftware.InnoSetup -e --scope user`) als `ILIAS-Sync-<version>-Setup.exe` (etwa 38 MB) plus `.sha256`. Installiert ohne Adminrechte nach `%LOCALAPPDATA%\Programs\ILIAS Sync`, Startmenü Eintrag, optional Desktop. Update = neue Setup Datei ausführen (feste AppId, schließt die laufende App, alte `_internal` wird ersetzt). Deinstallieren entfernt Programm und Autostart Eintrag, nie Config, Index oder Downloads. Unsigniert, daher SmartScreen Warnung beim ersten Start
 
 
 ## App Updates
