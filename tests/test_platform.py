@@ -24,7 +24,7 @@ def test_mac_autostart_on_and_off(mac):
     assert data["Label"] == "de.uni-mannheim.ilias-sync"
     assert data["RunAtLoad"] is True
     assert data["KeepAlive"] == {"SuccessfulExit": False}  # nach Absturz neu starten, nach Beenden nicht
-    assert data["ProgramArguments"] == [sys.executable, "-m", "ilias_sync"]
+    assert data["ProgramArguments"] == [sys.executable, "-m", "ilias_sync", "--autostart"]
     assert pu.autostart_enabled()
     pu.set_autostart(True)   # zweimal an ist kein Fehler
     pu.set_autostart(False)
@@ -34,7 +34,7 @@ def test_mac_autostart_on_and_off(mac):
 
 def test_frozen_app_starts_itself(monkeypatch):
     monkeypatch.setattr(pu.sys, "frozen", True, raising=False)
-    assert pu.autostart_command() == [sys.executable]
+    assert pu.autostart_command() == [sys.executable, "--autostart"]
 
 
 class FakeWinreg(types.SimpleNamespace):

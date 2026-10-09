@@ -528,6 +528,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="nur diesen Kurs crawlen (mehrfach möglich)")
     parser.add_argument("--output", type=Path, metavar="DATEI", help="Ausgabe zusätzlich in Datei speichern")
     parser.add_argument("-v", "--verbose", action="store_true", help="ausführliche Ausgabe")
+    parser.add_argument("--autostart", action="store_true",
+                        help="Start durch den Autostart: nur Menüleiste bzw. Tray, ohne Fenster")
     parser.add_argument("--config-dir", type=Path, metavar="ORDNER",
                         help=f"Config, Daten und Log in ORDNER statt im Standard Ort (wie {config.HOME_ENV})")
     args = parser.parse_args(argv)
@@ -544,7 +546,8 @@ def main(argv: list[str] | None = None) -> int:
         from .api import Api
         from .gui.app import run
 
-        return run(Api())
+        # Start per Doppelklick (Finder, Startmenü): Fenster öffnen. Autostart: nur Menüleiste
+        return run(Api(), show_window=not args.autostart)
 
     if args.login:
         return cmd_login()
