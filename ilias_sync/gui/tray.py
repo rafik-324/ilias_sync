@@ -26,6 +26,7 @@ ZIEL_GEAENDERT = "changed"      # Übersicht, Bereich "In ILIAS geändert"
 ZIEL_KURSE = "courses"
 ZIEL_LOG = "log"
 ZIEL_LOGIN = "login"
+ZIEL_UPDATE = "update"          # Update Dialog
 
 
 def open_path(path: Path) -> bool:
@@ -38,6 +39,7 @@ def open_path(path: Path) -> bool:
 class Tray(QObject):
     open_window = Signal(str)     # Tab Name
     open_login = Signal()
+    open_update = Signal()        # Update Dialog öffnen
     quit_requested = Signal()
     info = Signal(str)            # Hinweis an den Nutzer ohne Fenster (z. B. Datei fehlt)
 
@@ -47,6 +49,7 @@ class Tray(QObject):
         self._frame = 0
         self._static_sync = False
         self._notify_target = ZIEL_UEBERSICHT
+        self._notified_updates: set[str] = set()   # je Version nur eine Benachrichtigung
 
         self.icon = QSystemTrayIcon(tray_icon(IconState.READY), self)
         self.icon.activated.connect(self._on_activated)
@@ -66,14 +69,23 @@ class Tray(QObject):
         # Anzahl nur bei neuen Daten abfragen, nicht bei jedem Fortschrittsschritt
         controller.files_changed.connect(self.refresh_changed)
         controller.config_changed.connect(self.refresh_changed)
+        controller.update_changed.connect(self.refresh_update)
+        controller.update_prompt.connect(self._on_update_prompt)
         QGuiApplication.styleHints().colorSchemeChanged.connect(lambda *_: self.refresh())
         self.refresh()
         self.refresh_changed()
+        self.refresh_update()
 
     # ---------------- Menü ----------------
 
     def _build_menu(self) -> None:
         m = QMenu()
+        # nur sichtbar, wenn ein Update bereitsteht (GUI_KONTEXT.md 5, Punkt 0)
+        self.act_update = QAction("", m)
+        self.act_update.triggered.connect(self.open_update)
+        m.addAction(self.act_update)
+        self.sep_update = m.addSeparator()
+
         self.act_sync = QAction("Jetzt synchronisieren", m)
         self.act_sync.triggered.connect(self._sync_now)
         m.addAction(self.act_sync)
@@ -176,6 +188,12 @@ class Tray(QObject):
         self.act_changed.setText(logic.changed_count_text(n))
         self.act_changed.setVisible(n > 0)
 
+    def refresh_update(self) -> None:
+        info = self.controller.update_info
+        self.act_update.setText(logic.update_menu_text(info.version) if info else "")
+        self.act_update.setVisible(info is not None)
+        self.sep_update.setVisible(info is not None)
+
     def _next_frame(self) -> None:
         self._frame = (self._frame + 1) % SYNC_FRAMES
         self.icon.setIcon(tray_icon(IconState.SYNCING, self._frame))
@@ -216,6 +234,8 @@ class Tray(QObject):
     def _on_message_clicked(self) -> None:
         if self._notify_target == ZIEL_LOGIN:
             self.open_login.emit()
+        elif self._notify_target == ZIEL_UPDATE:
+            self.open_update.emit()
         else:
             self.open_window.emit(self._notify_target)
 
@@ -238,6 +258,12 @@ class Tray(QObject):
             target = ZIEL_UEBERSICHT
         if lines:
             self.notify("\n".join(lines), target, error=bool(result.errors))
+
+    def _on_update_prompt(self, info) -> None:
+        if info.version in self._notified_updates:
+            return
+        self._notified_updates.add(info.version)
+        self.notify(logic.update_notify_text(info.version), ZIEL_UPDATE)
 
     def _on_error(self, text: str, _automatic: bool) -> None:
         self.notify(f"Sync fehlgeschlagen: {text}", ZIEL_LOG, error=True)

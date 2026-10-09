@@ -83,6 +83,7 @@ class Config:
     autostart: bool = False
     sync_paused: bool = False
     username: str | None = None       # Uni-ID, nie das Passwort
+    check_updates: bool = True        # beim Start und täglich nach App Updates fragen (GUI_KONTEXT.md 3.5)
 
 
 @dataclass
@@ -162,6 +163,15 @@ class SyncResult:
     new_unassigned_courses: list[IliasCourse]
     errors: list[str]
     changed_files: list[ChangedFile] = field(default_factory=list)  # in diesem Lauf neu als geändert erkannt
+
+
+@dataclass
+class UpdateInfo:
+    """Neuere App Version auf dem Update Server (GUI_KONTEXT.md 3.5)."""
+    version: str                      # z. B. "0.2.0"
+    notes: str                        # Änderungen als Klartext, Zeilen mit "\n"
+    size: int | None                  # Größe des Installers in Bytes
+    published_at: datetime | None
 
 
 @dataclass

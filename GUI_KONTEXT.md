@@ -271,7 +271,35 @@ class Api:
     # Autostart
     def autostart_enabled(self) -> bool: ...
     def set_autostart(self, enabled: bool) -> None: ...
+
+    # App Updates (Abschnitt 3.5)
+    def app_version(self) -> str: ...                  # z. B. "0.1.0", schnell
+    def can_self_update(self) -> bool: ...
+        # False beim Start aus dem Quellcode oder wenn der App Ordner nicht beschreibbar ist
+    def check_for_update(self) -> UpdateInfo | None: ...
+        # Netzwerk. None = aktuell. Wirft NetworkError
+    def download_update(self, info: UpdateInfo, progress: ProgressCallback,
+                        cancel: threading.Event) -> Path: ...
+        # Netzwerk. Lädt den Installer ins Datenverzeichnis und prüft SHA-256.
+        # Wirft NetworkError, Cancelled, IliasSyncError (Prüfsumme falsch, Datei wird gelöscht)
+    def install_update(self, installer: Path) -> None: ...
+        # Startet ein Hilfsskript, das auf das Ende der App wartet, die App ersetzt und neu startet.
+        # Die GUI beendet die App direkt danach (QApplication.quit). Wirft IliasSyncError
 ```
+
+### 3.5 App Updates
+
+Entscheidung des Nutzers (2026-10-10): Wer die App hat, bekommt alle Updates, ohne Code und ohne Webseite. Die App fragt nach, zeigt ein Popup und installiert auf Wunsch selbst.
+
+* **Server**: `GET https://<webseite>/api/update?platform=mac|win&version=<app_version>` mit Header `X-App-Key`. Antwort JSON `{"version", "notes", "size", "sha256", "published_at"}`, mit `&download=1` zusätzlich `"url"` (signierter Link, 10 Minuten gültig). Ohne gültigen Schlüssel `403`. Der Schlüssel ist ein App Geheimnis in `ilias_sync/updater.py` (kein echter Schutz, hält nur Fremde fern)
+* **Prüfen**: beim Start (nach 30 Sekunden) und danach alle 24 Stunden, nur wenn `Config.check_updates`. Fehler beim Prüfen nur loggen, nie als Fehler Benachrichtigung zeigen
+* **Popup** (`QMessageBox` bzw. eigener Dialog, nicht modal blockierend für den Sync): Titel "Neues Update verfügbar", Text "ILIAS Sync <version> ist da (du hast <app_version>)." plus `notes`. Knöpfe **Jetzt installieren** und **Später**. "Später" fragt erst beim nächsten Start bzw. nach 24 Stunden erneut. Je Version höchstens einmal pro Tag zeigen
+* **Installieren**: Fortschritt im Dialog (`download_update` im Worker, abbrechbar). Läuft gerade ein Sync, erst danach installieren (Knopf bis dahin deaktiviert mit Hinweis). Danach `install_update` und sofort `QApplication.quit()`. Ist `can_self_update()` falsch: statt "Jetzt installieren" Hinweis "Update bitte manuell installieren" ohne Knopf
+* **Tray Menü**: steht ein Update bereit, über "Jetzt synchronisieren" ein Eintrag **Update auf <version> installieren …**, öffnet das Popup
+* **Einstellungen**: Checkbox **Automatisch nach Updates suchen** (`check_updates`) und Button **Jetzt nach Updates suchen** (zeigt "ILIAS Sync ist aktuell (<version>)" oder das Popup). Daneben die eigene Version
+* **macOS Installation**: Hilfsskript wartet auf das Ende des Prozesses, hängt die DMG an, kopiert die neue `.app` neben die alte (`.app.neu`), verschiebt die alte in den Papierkorb, benennt um, hängt ab, startet die App neu (`open`). Die App muss in einem beschreibbaren Ordner liegen (z. B. `/Applications` mit Admin Konto). Nach dem Update fragt der Schlüsselbund einmal nach (ad hoc Signatur), "Immer erlauben"
+* **Windows Installation**: Installer ist ein ZIP des Ordners `ILIAS Sync`. Hilfsskript wartet auf das Ende, entpackt neben den alten Ordner, benennt alt nach `ILIAS Sync.alt` um, neu an seinen Platz, startet `ILIAS Sync.exe`, löscht `.alt` erst nach erfolgreichem Start
+* **Datenschutz**: einziger Kontakt außer ILIAS. Gesendet werden nur Plattform, Version und der App Schlüssel
 
 ### 3.4 Hilfsfunktionen (Modulebene in `api.py`)
 
@@ -308,6 +336,7 @@ linux_name("Ü1_MfN_Übungsskript Kernlösung.PDF")   # -> "ue1_mfn_uebungsskrip
 
 ### Menü (Reihenfolge fest)
 
+0. Nur wenn ein Update bereitsteht: **Update auf <version> installieren …** (Abschnitt 3.5)
 1. **Jetzt synchronisieren** (deaktiviert während Sync; bei Login nötig öffnet es den Login Dialog)
 2. **Letzter Sync: <Zeit> (<n> neue Dateien)** (nicht klickbar). Zeit relativ: "vor 5 Min.", "heute 14:03", "gestern 09:12", sonst Datum
 3. **Neue Dateien ▸** Untermenü mit den letzten 10 Dateien (`recent_files(10)`), Anzeige "Dateiname (Kurs)", Klick öffnet die Datei. Existiert die Datei nicht mehr: Hinweis statt Fehler
@@ -368,6 +397,7 @@ Klein und übersichtlich, Startgröße etwa 800 × 560, Größe und Position wer
 * **Semester Ordner** (`semesters`): kleine Tabelle "HWS 2026" → `01_SEMESTER`. Semester aus Kursnamen ohne Ordner erscheinen als leere Zeile (wird beim Sync mit der nächsten Nummer angelegt, z. B. `02_semester`; vorhandene Ordner wie `01_SEMESTER` behalten ihre Schreibweise)
 * **Ignorierte lokale Ordner** (Liste mit Hinzufügen / Entfernen, Glob Muster)
 * **Autostart** Checkbox (`set_autostart`)
+* **Updates**: Checkbox **Automatisch nach Updates suchen** (`check_updates`), Button **Jetzt nach Updates suchen**, Anzeige der eigenen Version (Abschnitt 3.5)
 * **Konto**: angezeigte Uni-ID, Button **Abmelden** mit Bestätigung ("Passwort und Session werden von diesem Gerät entfernt. Heruntergeladene Dateien bleiben erhalten.")
 * Config Fehler (`ConfigError`) werden oben im Tab rot und verständlich angezeigt
 

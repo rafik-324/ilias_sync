@@ -13,6 +13,11 @@ Umgebungsvariable ``ILIAS_FAKE_FAIL`` (kommagetrennt):
   config        load_config wirft ConfigError
   sync_errors   Sync meldet einzelne Fehler
   session       check_session meldet LOGIN_REQUIRED
+  update        check_for_update meldet eine neue Version (sonst: aktuell)
+  update_offline  check_for_update und download_update werfen NetworkError
+  update_checksum download_update meldet eine falsche Prüfsumme
+  no_self_update  can_self_update ist falsch (Start aus dem Quellcode)
+  install_error   install_update wirft IliasSyncError
 """
 
 from __future__ import annotations
@@ -28,6 +33,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from ilias_sync import __version__
 from ilias_sync.gui import logic
 from ilias_sync.api import (
     ActionKind,
@@ -40,6 +46,7 @@ from ilias_sync.api import (
     CourseRule,
     DownloadedFile,
     IliasCourse,
+    IliasSyncError,
     InvalidCredentialsError,
     ItemStatus,
     MappingSuggestion,
@@ -50,6 +57,7 @@ from ilias_sync.api import (
     SessionState,
     SyncResult,
     SyncRun,
+    UpdateInfo,
     linux_name,
 )
 
@@ -57,6 +65,9 @@ log = logging.getLogger("ilias_sync.fake")
 
 # Namensregel (api.linux_name) gilt für alles, was das Tool neu anlegt. Vorhandene Ordner
 # des Nutzers (01_SEMESTER, 01_Vorlesung, 02_Übung ...) behalten ihre Schreibweise, wie in der Praxis.
+
+FAKE_UPDATE_VERSION = "9.9.0"
+FAKE_UPDATE_SIZE = 98_000_000
 
 FAKE_PASSWORD_HINT = "Beim Fake Backend funktioniert jedes Passwort außer 'falsch'."
 
@@ -167,6 +178,7 @@ class FakeApi:
         self._downloaded: dict[int, DownloadedFile] = {}
         self._removed: set[int] = set()
         self._changed: dict[int, ChangedFile] = {}
+        self.installed_update: Path | None = None   # zuletzt "installiertes" Update (nur gemerkt)
 
         self._log_dir = self.workdir / "logs"
         self._log_dir.mkdir(parents=True, exist_ok=True)
@@ -625,3 +637,49 @@ class FakeApi:
     def set_autostart(self, enabled: bool) -> None:
         self._autostart = enabled
         log.info("Autostart %s", "aktiviert" if enabled else "deaktiviert")
+
+    # ---------------- App Updates ----------------
+
+    def app_version(self) -> str:
+        return __version__
+
+    def can_self_update(self) -> bool:
+        return "no_self_update" not in self.fail
+
+    def check_for_update(self) -> UpdateInfo | None:
+        time.sleep(self.delay * 4)
+        if "update_offline" in self.fail or "offline" in self.fail:
+            raise NetworkError("Der Update Server ist nicht erreichbar. Bitte Internetverbindung prüfen.")
+        if "update" not in self.fail:
+            return None
+        return UpdateInfo(
+            version=FAKE_UPDATE_VERSION,
+            notes="Neu: Updates direkt aus der App installieren.\nKleinere Korrekturen in der Übersicht.",
+            size=FAKE_UPDATE_SIZE,
+            published_at=datetime.now() - timedelta(days=1),
+        )
+
+    def download_update(self, info: UpdateInfo, progress: ProgressCallback, cancel: threading.Event) -> Path:
+        if "update_offline" in self.fail or "offline" in self.fail:
+            raise NetworkError("Der Update Server ist nicht erreichbar. Bitte Internetverbindung prüfen.")
+        total = info.size or FAKE_UPDATE_SIZE
+        steps = 20
+        for i in range(steps):
+            progress(Progress("Update herunterladen", total * i // steps, total, f"ILIAS Sync {info.version}"))
+            self._sleep(cancel)
+        progress(Progress("Update herunterladen", total, total, f"ILIAS Sync {info.version}"))
+        if "update_checksum" in self.fail:
+            log.warning("Fake: Prüfsumme des Updates falsch")
+            raise IliasSyncError("Die Prüfsumme des Updates stimmt nicht. Die Datei wurde gelöscht, "
+                                 "bitte erneut versuchen.")
+        target = self.workdir / "updates" / f"ILIAS-Sync-{info.version}.dmg"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("Platzhalter Installer aus dem Fake Backend.\n", encoding="utf-8")
+        log.info("Update heruntergeladen: %s", target.name)
+        return target
+
+    def install_update(self, installer: Path) -> None:
+        if "install_error" in self.fail:
+            raise IliasSyncError("Das Update konnte nicht gestartet werden. Bitte manuell installieren.")
+        self.installed_update = Path(installer)
+        log.info("Fake: Update würde jetzt installiert: %s", Path(installer).name)

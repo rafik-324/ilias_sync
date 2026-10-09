@@ -384,6 +384,15 @@ Sync läuft immer in einem Worker Thread (`QThread`), die GUI blockiert nie.
 * **Windows Installer**: `packaging\make_installer.ps1 [-Out ORDNER]` baut die App und packt sie mit Inno Setup 6 (`packaging/ilias_sync_windows.iss`, `winget install --id JRSoftware.InnoSetup -e --scope user`) als `ILIAS-Sync-<version>-Setup.exe` (etwa 38 MB) plus `.sha256`. Installiert ohne Adminrechte nach `%LOCALAPPDATA%\Programs\ILIAS Sync`, Startmenü Eintrag, optional Desktop. Update = neue Setup Datei ausführen (feste AppId, schließt die laufende App, alte `_internal` wird ersetzt). Deinstallieren entfernt Programm und Autostart Eintrag, nie Config, Index oder Downloads. Unsigniert, daher SmartScreen Warnung beim ersten Start
 
 
+## App Updates
+
+`ilias_sync/updater.py` fragt `https://ilias-sync.lovable.app/api/update` (Umgebungsvariable `ILIAS_SYNC_UPDATE_URL` für Tests), lädt den Installer nach `<Datenverzeichnis>/updates`, prüft SHA-256 und tauscht die App per Hilfsskript aus (GUI_KONTEXT.md 3.5). CLI: `--check-update`.
+
+Veröffentlichen:
+1. `__version__` in `ilias_sync/__init__.py` erhöhen, Installer bauen: macOS `packaging/make_dmg.sh` (`ILIAS-Sync-<version>.dmg`), Windows PyInstaller Build und `python packaging/make_win_zip.py "<dist>/ILIAS Sync"` (`ILIAS-Sync-<version>-windows.zip`)
+2. Größe und Prüfsumme: `python packaging/release_info.py <datei>`
+3. Datei in den Bucket `releases` laden, Version, Notizen, Größe und SHA-256 auf der Webseite eintragen (Details macht der Overview Agent)
+
 ## Meilensteine
 
 1. **Auth**: `ilias_login.py` in `auth.py` überführen, Login + Session Wiederverwendung auf Windows und macOS testen

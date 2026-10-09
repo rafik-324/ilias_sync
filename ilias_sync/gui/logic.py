@@ -503,3 +503,43 @@ def contents_summary(flags: list[tuple[str, bool]]) -> str:
     if len(off) <= 2:
         return "Ohne " + " und ".join(off)
     return f"{len(flags) - len(off)} von {len(flags)}"
+
+
+# ---------------- App Updates ----------------
+
+UPDATE_REMIND_AFTER = timedelta(hours=24)
+
+
+def update_prompt_due(version: str, shown_version: str | None, shown_at: datetime | None,
+                      now: datetime) -> bool:
+    """Darf das Update Popup automatisch erscheinen? Dieselbe Version höchstens einmal
+    in 24 Stunden (nach "Später" oder automatischem Anzeigen), eine neuere sofort."""
+    if shown_version != version or shown_at is None:
+        return True
+    return now - shown_at >= UPDATE_REMIND_AFTER
+
+
+def parse_iso(text: object) -> datetime | None:
+    """Zeitpunkt aus QSettings (ISO Text). Kaputte Werte gelten als nicht vorhanden."""
+    if not isinstance(text, str) or not text:
+        return None
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def update_dialog_text(version: str, app_version: str) -> str:
+    return f"ILIAS Sync {version} ist da (du hast {app_version})."
+
+
+def update_menu_text(version: str) -> str:
+    return f"Update auf {version} installieren …"
+
+
+def update_notify_text(version: str) -> str:
+    return f"Update auf {version} verfügbar"
+
+
+def up_to_date_text(app_version: str) -> str:
+    return f"ILIAS Sync ist aktuell ({app_version})"
