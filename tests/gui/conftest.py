@@ -16,3 +16,14 @@ def fake(tmp_path):
 @pytest.fixture
 def fake_first_run(tmp_path):
     return FakeApi(first_run=True, delay=0.0, workdir=tmp_path / "ilias_sync_fake")
+
+
+@pytest.fixture(autouse=True)
+def _qsettings_im_tmp(tmp_path):
+    """QSettings (Fenstergeometrie, Update "Später") in ein Temp Verzeichnis lenken,
+    damit Tests nie die Einstellungen der echten App lesen oder schreiben."""
+    from PySide6.QtCore import QSettings
+
+    QSettings.setDefaultFormat(QSettings.Format.IniFormat)
+    QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(tmp_path / "qsettings"))
+    yield

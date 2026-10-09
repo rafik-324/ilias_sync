@@ -29,6 +29,7 @@ from ilias_sync.gui.macos import activate_app, hide_dock_icon
 from ilias_sync.gui.scheduler_gui import Scheduler
 from ilias_sync.gui.setup_wizard import SetupWizard
 from ilias_sync.gui.tray import ZIEL_UEBERSICHT, Tray
+from ilias_sync.gui.update_dialog import UpdateDialog
 from ilias_sync.gui.widgets import LoginDialog
 from ilias_sync.gui.window import MainWindow
 
@@ -111,12 +112,17 @@ class GuiApp:
         self.window: MainWindow | None = None
         self.wizard: SetupWizard | None = None
         self._login_dialog: LoginDialog | None = None
+        self.update_dialog: UpdateDialog | None = None
         self._quitting = False
 
         self.tray.open_window.connect(self.show_window)
         self.tray.open_login.connect(self.show_login)
         self.tray.quit_requested.connect(self.quit)
         self.controller.login_required.connect(self._on_login_required)
+        self.tray.open_update.connect(self.show_update_dialog)
+        self.controller.update_prompt.connect(self.show_update_dialog)
+        self.controller.update_check_result.connect(self._on_update_check_result)
+        self.controller.quit_requested.connect(lambda: self.quit(force=True))
 
     def start(self, show_window: bool = False) -> None:
         self.tray.show()
@@ -130,6 +136,7 @@ class GuiApp:
     def _start_normal(self) -> None:
         self.controller.check_session()
         self.scheduler.start()
+        self.controller.start_update_checks()
 
     # ---------------- Fenster ----------------
 
@@ -198,12 +205,40 @@ class GuiApp:
         if self.window is not None and self.window.isVisible() and self.window.isActiveWindow():
             QTimer.singleShot(0, self.show_login)
 
+    # ---------------- Updates ----------------
+
+    def show_update_dialog(self, info=None) -> None:
+        """Update Dialog zeigen (nicht modal), vorhandenen wiederverwenden."""
+        info = info or self.controller.update_info
+        if info is None:
+            return
+        if self.update_dialog is None:
+            self.update_dialog = UpdateDialog(self.controller, info)
+            self.update_dialog.finished.connect(self._update_dialog_closed)
+        elif not self.controller.updating:
+            self.update_dialog.set_info(info)
+        self.update_dialog.show()
+        activate_app()
+        self.update_dialog.raise_()
+        self.update_dialog.activateWindow()
+
+    def _update_dialog_closed(self, *_args) -> None:
+        if self.update_dialog is not None:
+            self.update_dialog.deleteLater()
+        self.update_dialog = None
+
+    def _on_update_check_result(self, info, _error: str) -> None:
+        # manuelle Prüfung: Ergebnis "aktuell" bzw. Fehler zeigt die Seite Einstellungen
+        if info is not None:
+            self.show_update_dialog(info)
+
     # ---------------- Beenden ----------------
 
-    def quit(self) -> None:
+    def quit(self, force: bool = False) -> None:
+        """App beenden. force: ohne Rückfrage (nach dem Start eines Updates)."""
         if self._quitting:
             return
-        if self.controller.busy:
+        if self.controller.busy and not force:
             answer = QMessageBox.question(
                 None, "ILIAS Sync beenden",
                 "Gerade läuft eine Synchronisierung. Sie wird abgebrochen. Trotzdem beenden?",

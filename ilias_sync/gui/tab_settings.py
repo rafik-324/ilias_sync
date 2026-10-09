@@ -1,4 +1,4 @@
-"""Tab Einstellungen: Basisordner, Intervall, Parallelität, Autostart, Konto."""
+"""Tab Einstellungen: Basisordner, Intervall, Parallelität, Autostart, Updates, Konto."""
 
 from __future__ import annotations
 
@@ -143,6 +143,25 @@ class SettingsTab(Page):
                                 "Muster mit * erlaubt."))
         v3.addLayout(ign_row)
 
+        # Updates
+        self.check_updates = QCheckBox("Automatisch nach Updates suchen")
+        self.check_updates.toggled.connect(self._changed)
+        self.version = QLabel(f"Version {self.c.app_version()}")
+        self.btn_check_update = button("Jetzt nach Updates suchen")
+        self.btn_check_update.clicked.connect(self._check_update)
+        self.update_status = hint_label()
+        self.update_status.hide()
+        upd_row = QHBoxLayout()
+        upd_row.addWidget(self.version, 1)
+        upd_row.addWidget(self.btn_check_update)
+        box_updates = QGroupBox("Updates")
+        v_upd = QVBoxLayout(box_updates)
+        v_upd.setContentsMargins(0, 8, 0, 0)
+        v_upd.setSpacing(10)
+        v_upd.addLayout(upd_row)
+        v_upd.addWidget(self.update_status)
+        v_upd.addWidget(self.check_updates)
+
         # Konto
         self.account = QLabel()
         self.btn_login = button("Anmelden ...", "primary")
@@ -177,6 +196,7 @@ class SettingsTab(Page):
         inner.addWidget(box_sync)
         inner.addWidget(box_sem)
         inner.addWidget(box_ignore)
+        inner.addWidget(box_updates)
         inner.addWidget(box_account)
         inner.addStretch(1)
         scroll = QScrollArea()
@@ -189,6 +209,7 @@ class SettingsTab(Page):
 
         self.c.config_changed.connect(self._on_config_changed)
         self.c.state_changed.connect(self._refresh_state)
+        self.c.update_check_result.connect(self._on_update_result)
         self.load()
 
     # ---------------- Laden ----------------
@@ -209,6 +230,7 @@ class SettingsTab(Page):
             self.pattern.setText(cfg.semester_pattern)
             self.ignore.clear()
             self.ignore.addItems(cfg.ignore_local_dirs)
+            self.check_updates.setChecked(cfg.check_updates)
             self._fill_semesters(logic.semester_rows(cfg))
         try:
             self.autostart.setChecked(self.c.api.autostart_enabled())
@@ -343,6 +365,7 @@ class SettingsTab(Page):
         cfg.ignore_local_dirs = [self.ignore.item(i).text() for i in range(self.ignore.count())]
         cfg.semesters = self._semesters()
         cfg.autostart = self.autostart.isChecked()
+        cfg.check_updates = self.check_updates.isChecked()
 
         errors = logic.validate_settings(cfg)
         if errors:
@@ -386,6 +409,28 @@ class SettingsTab(Page):
         if not self.confirm_leave():
             return
         self.c.start_sync()
+
+    def _check_update(self) -> None:
+        if not self.c.check_for_updates(manual=True):
+            return
+        self.btn_check_update.setEnabled(False)
+        self.update_status.setText("Suche nach Updates ...")
+        set_muted(self.update_status)
+        self.update_status.show()
+
+    def _on_update_result(self, info, error: str) -> None:
+        self.btn_check_update.setEnabled(True)
+        if error:
+            self.update_status.setText(f"Prüfung fehlgeschlagen: {error}")
+            theme.set_role(self.update_status, "error")
+        elif info is None:
+            self.update_status.setText(logic.up_to_date_text(self.c.app_version()))
+            theme.set_role(self.update_status, "success")
+        else:
+            # der Dialog öffnet sich (app.py), hier nur ein Hinweis
+            self.update_status.setText(logic.update_notify_text(info.version))
+            set_muted(self.update_status)
+        self.update_status.show()
 
     def _logout(self) -> None:
         answer = QMessageBox.question(
