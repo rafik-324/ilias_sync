@@ -68,6 +68,8 @@ class MainWindow(QMainWindow):
         # denselben Weg wie im Tray Menü, damit ein laufender Sync sauber abbricht
         QShortcut(QKeySequence.StandardKey.Close, self, self.close)
         QShortcut(QKeySequence.StandardKey.Quit, self, self.quit_requested.emit)
+        # ⌘M (macOS) bzw. Strg+M: ins Dock bzw. in die Taskleiste minimieren
+        QShortcut(QKeySequence("Ctrl+M"), self, self.showMinimized)
 
         self._current_index = 0
         self.nav.setCurrentRow(0)
