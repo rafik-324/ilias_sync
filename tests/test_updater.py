@@ -10,7 +10,7 @@ import subprocess
 import sys
 import threading
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 import requests
@@ -291,9 +291,10 @@ ODD = "Prog ramme/Ünï 'quote' $HOME `x`"
 
 
 def test_mac_script_quotes_paths(tmp_path):
-    app = Path("/Users/max/" + ODD + "/ILIAS Sync.app")
-    dmg = Path("/Users/max/Library/Application Support/ilias-sync/updates/ILIAS-Sync-0.2.0.dmg")
-    text = updater.mac_script(4242, app, dmg, Path("/tmp/a b/log.txt"))
+    # PurePosixPath: macOS Pfade, auch wenn der Test unter Windows läuft
+    app = PurePosixPath("/Users/max/" + ODD + "/ILIAS Sync.app")
+    dmg = PurePosixPath("/Users/max/Library/Application Support/ilias-sync/updates/ILIAS-Sync-0.2.0.dmg")
+    text = updater.mac_script(4242, app, dmg, PurePosixPath("/tmp/a b/log.txt"))
     assert "PID=4242" in text
     assert "APP='/Users/max/Prog ramme/Ünï '\"'\"'quote'\"'\"' $HOME `x`/ILIAS Sync.app'" in text
     assert "DMG='/Users/max/Library/Application Support/ilias-sync/updates/ILIAS-Sync-0.2.0.dmg'" in text
@@ -302,7 +303,8 @@ def test_mac_script_quotes_paths(tmp_path):
     # Nur Syntax prüfen, nichts ausführen
     script = tmp_path / "s.sh"
     script.write_text(text, encoding="utf-8")
-    if shutil.which("bash"):
+    # Unter Windows wäre "bash" meist WSL, das Windows Pfade nicht versteht
+    if sys.platform != "win32" and shutil.which("bash"):
         subprocess.run(["bash", "-n", str(script)], check=True)
 
 
@@ -316,10 +318,37 @@ def test_win_script_quotes_paths():
     assert f"$Neu = '{a}.neu'" in text and f"$Alt = '{a}.alt'" in text
     assert "Expand-Archive -LiteralPath $Zip" in text
     assert "Remove-Item -LiteralPath $Alt" in text
+    # Uninstaller des Inno Setup Installers bleibt erhalten
+    assert "-Filter 'unins*'" in text and "Copy-Item -Destination $Src" in text
     # Gelöscht werden nur $Neu und $Alt
     for line in text.splitlines():
         if "Remove-Item" in line:
             assert "-LiteralPath $Neu" in line or "-LiteralPath $Alt" in line
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows Prozess Flags")
+def test_win_helper_flags(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(updater.subprocess, "Popen", lambda args, **kw: calls.append(kw["creationflags"]))
+    updater._start_win_helper(["powershell.exe"], tmp_path)
+    flags = calls[0]
+    # DETACHED_PROCESS lässt powershell.exe sofort sterben (im Test auf Windows gesehen)
+    assert not flags & subprocess.DETACHED_PROCESS
+    assert flags & subprocess.CREATE_NO_WINDOW and flags & subprocess.CREATE_BREAKAWAY_FROM_JOB
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows Prozess Flags")
+def test_win_helper_without_breakaway(monkeypatch, tmp_path):
+    calls = []
+
+    def popen(args, **kw):
+        calls.append(kw["creationflags"])
+        if kw["creationflags"] & subprocess.CREATE_BREAKAWAY_FROM_JOB:
+            raise PermissionError(13, "Zugriff verweigert")
+
+    monkeypatch.setattr(updater.subprocess, "Popen", popen)
+    updater._start_win_helper(["powershell.exe"], tmp_path)
+    assert len(calls) == 2 and not calls[1] & subprocess.CREATE_BREAKAWAY_FROM_JOB
 
 
 # ---------------- Config ----------------

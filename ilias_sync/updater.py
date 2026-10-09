@@ -359,6 +359,8 @@ try {{
     Expand-Archive -LiteralPath $Zip -DestinationPath $Neu -Force
     $Src = Join-Path $Neu 'ILIAS Sync'
     if (-not (Test-Path -LiteralPath (Join-Path $Src $ExeName))) {{ throw 'keine App im ZIP' }}
+    # Deinstallationsprogramm des Windows Installers (Inno Setup) übernehmen, es steckt nicht im ZIP
+    Get-ChildItem -LiteralPath $App -Filter 'unins*' -File | Copy-Item -Destination $Src -Force
     Move-Item -LiteralPath $App -Destination $Alt
     $moved = $true
     Move-Item -LiteralPath $Src -Destination $App
@@ -381,6 +383,27 @@ Start-Sleep -Seconds 5
 Remove-Item -LiteralPath $Alt -Recurse -Force -ErrorAction SilentlyContinue
 exit 0
 """
+
+
+def _start_win_helper(args: list[str], cwd: Path) -> None:
+    """PowerShell Hilfsskript unsichtbar und unabhängig von der App starten.
+
+    Nicht DETACHED_PROCESS: ohne Konsole beendet sich powershell.exe sofort, ohne das Skript
+    auszuführen. CREATE_NO_WINDOW gibt ihm eine unsichtbare Konsole. Zuerst mit
+    CREATE_BREAKAWAY_FROM_JOB, damit das Skript nicht mit dem Job der App endet. Erlaubt
+    der Job das nicht (Zugriff verweigert), ohne."""
+    base = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
+    for flags in (base | subprocess.CREATE_BREAKAWAY_FROM_JOB, base):  # type: ignore[attr-defined]
+        try:
+            subprocess.Popen(
+                args, cwd=str(cwd), creationflags=flags, close_fds=True,
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            return
+        except PermissionError:
+            if flags == base:
+                raise
+            log.info("Updates: Job erlaubt kein Loslösen, Hilfsskript startet ohne")
 
 
 def install(installer: Path) -> None:
@@ -409,12 +432,10 @@ def install(installer: Path) -> None:
             # Mit BOM, sonst liest Windows PowerShell 5.1 Umlaute in Pfaden falsch
             script.write_text(win_script(pid, app, installer, log_file, Path(sys.executable).name),
                               encoding="utf-8-sig")
-            flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS  # type: ignore[attr-defined]
-            subprocess.Popen(
+            _start_win_helper(
                 ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
                  "-WindowStyle", "Hidden", "-File", str(script)],
-                cwd=str(folder), creationflags=flags, close_fds=True,
-                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                folder,
             )
     except OSError as e:
         log.error("Updates: Hilfsskript nicht startbar: %s", type(e).__name__)
