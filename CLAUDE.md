@@ -383,6 +383,15 @@ Sync läuft immer in einem Worker Thread (`QThread`), die GUI blockiert nie.
   Ergebnis Ordner `ILIAS Sync` mit `ILIAS Sync.exe` (onedir, ohne Konsolenfenster, etwa 126 MB, unsigniert). Geprüft: `--status` findet Config, Anmeldeinformationsverwaltung und Session. Autostart erst einschalten, wenn der Ordner an seinem endgültigen Ort liegt
 
 
+## App Updates
+
+`ilias_sync/updater.py` fragt `https://ilias-sync.lovable.app/api/update` (Umgebungsvariable `ILIAS_SYNC_UPDATE_URL` für Tests), lädt den Installer nach `<Datenverzeichnis>/updates`, prüft SHA-256 und tauscht die App per Hilfsskript aus (GUI_KONTEXT.md 3.5). CLI: `--check-update`.
+
+Veröffentlichen:
+1. `__version__` in `ilias_sync/__init__.py` erhöhen, Installer bauen: macOS `packaging/make_dmg.sh` (`ILIAS-Sync-<version>.dmg`), Windows PyInstaller Build und `python packaging/make_win_zip.py "<dist>/ILIAS Sync"` (`ILIAS-Sync-<version>-windows.zip`)
+2. Größe und Prüfsumme: `python packaging/release_info.py <datei>`
+3. Datei in den Bucket `releases` laden, Version, Notizen, Größe und SHA-256 auf der Webseite eintragen (Details macht der Overview Agent)
+
 ## Meilensteine
 
 1. **Auth**: `ilias_login.py` in `auth.py` überführen, Login + Session Wiederverwendung auf Windows und macOS testen

@@ -139,7 +139,7 @@ def from_dict(raw: dict) -> Config:
         general,
         {
             "base_dir", "root_folder_name", "sync_interval_minutes", "max_parallel",
-            "semester_pattern", "autostart", "sync_paused", "username",
+            "semester_pattern", "autostart", "sync_paused", "username", "check_updates",
         },
         "general",
     )
@@ -168,6 +168,7 @@ def from_dict(raw: dict) -> Config:
         autostart=_get(general, "autostart", bool, "general", defaults.autostart),
         sync_paused=_get(general, "sync_paused", bool, "general", defaults.sync_paused),
         username=_get(general, "username", str, "general"),
+        check_updates=_get(general, "check_updates", bool, "general", defaults.check_updates),
     )
 
 
@@ -230,6 +231,7 @@ def to_dict(cfg: Config) -> dict:
         "autostart": cfg.autostart,
         "sync_paused": cfg.sync_paused,
         "username": cfg.username,
+        "check_updates": cfg.check_updates,
     }
     courses = []
     for c in cfg.courses:

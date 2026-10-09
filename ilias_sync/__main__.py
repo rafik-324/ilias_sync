@@ -489,6 +489,26 @@ def cmd_sync(dry_run: bool, output: Path | None) -> int:
         return 0 if not sync_result.errors else 2
 
 
+def cmd_check_update() -> int:
+    from . import __version__, updater
+    from .api import IliasSyncError
+    from .backend import update_errors
+
+    try:
+        with update_errors():
+            info = updater.check(__version__)
+    except IliasSyncError as e:
+        print(f"Fehler: {e}")
+        return 1
+    if info is None:
+        print(f"aktuell ({__version__})")
+        return 0
+    print(f"Update verfügbar: {info.version} (installiert {__version__})")
+    if info.notes:
+        print(info.notes)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ilias_sync", description="ILIAS Sync (Uni Mannheim)")
     group = parser.add_mutually_exclusive_group()
@@ -502,6 +522,7 @@ def main(argv: list[str] | None = None) -> int:
     group.add_argument("--dry-run", action="store_true", help="zeigen, was ein Sync tun würde, nichts schreiben")
     group.add_argument("--sync", action="store_true",
                        help="echter Sync in den Uni Ordner aus der Config (erster Sync nur in leeren Ordner)")
+    group.add_argument("--check-update", action="store_true", help="nach einer neuen App Version fragen")
     parser.add_argument("--videos", action="store_true", help="beim Test Sync auch Videos laden")
     parser.add_argument("--course", type=int, action="append", default=[], metavar="REF_ID",
                         help="nur diesen Kurs crawlen (mehrfach möglich)")
@@ -517,7 +538,8 @@ def main(argv: list[str] | None = None) -> int:
     log_file = setup_logging(args.verbose)
     log.debug("Log Datei: %s", log_file)
 
-    if not any((args.login, args.logout, args.status, args.crawl, args.test_sync, args.dry_run, args.sync)):
+    if not any((args.login, args.logout, args.status, args.crawl, args.test_sync, args.dry_run, args.sync,
+                args.check_update)):
         # Ohne Argumente: App mit Menüleisten bzw. Tray Icon starten
         from .api import Api
         from .gui.app import run
@@ -528,6 +550,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_login()
     if args.status:
         return cmd_status()
+    if args.check_update:
+        return cmd_check_update()
     if args.crawl:
         return cmd_crawl(args.course, args.output)
     if args.test_sync:

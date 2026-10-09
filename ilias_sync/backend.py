@@ -24,11 +24,11 @@ from pathlib import Path
 import keyring.errors
 import requests
 
-from . import auth, config, crawler, mapper, platform_utils, state, sync
+from . import __version__, auth, config, crawler, mapper, platform_utils, state, sync, updater
 from .api import (
     BaseDirCheck, Cancelled, ChangedFile, Config, ConfigError, DownloadedFile, IliasCourse, IliasSyncError,
     InvalidCredentialsError, LoginError, MappingSuggestion, NetworkError, PlannedAction, Progress,
-    ProgressCallback, SessionState, SyncResult, SyncRun,
+    ProgressCallback, SessionState, SyncResult, SyncRun, UpdateInfo,
 )
 
 log = logging.getLogger(__name__)
@@ -65,6 +65,25 @@ def translate_errors() -> Iterator[None]:
     except keyring.errors.KeyringError as e:
         log.warning("Schlüsselbund Fehler: %s", type(e).__name__)
         raise LoginError("Auf den Schlüsselbund kann gerade nicht zugegriffen werden.") from None
+
+
+@contextmanager
+def update_errors() -> Iterator[None]:
+    """Fehler beim Update in anzeigbare IliasSyncError übersetzen (Texte nennen den Update Server)."""
+    try:
+        yield
+    except IliasSyncError:
+        raise
+    except requests.RequestException as e:
+        # Nur der Typ ins Log, die Ausnahme kann die signierte Download URL enthalten
+        log.warning("Update Server Fehler: %s", type(e).__name__)
+        if isinstance(e, requests.Timeout):
+            raise NetworkError("Der Update Server antwortet gerade nicht. Bitte später erneut versuchen.") from None
+        raise NetworkError("Der Update Server ist nicht erreichbar. Bitte Internetverbindung prüfen.") from None
+    except OSError as e:
+        log.warning("Update Datei Fehler: %s", type(e).__name__)
+        raise IliasSyncError(f"Das Update konnte nicht gespeichert werden ({e.strerror or type(e).__name__}).") \
+            from None
 
 
 class Api:
@@ -428,3 +447,25 @@ class Api:
         if cfg.autostart != enabled:
             cfg.autostart = enabled
             config.save_config(cfg, self._config_path)
+
+    # ---------------- App Updates (GUI_KONTEXT.md 3.5) ----------------
+
+    def app_version(self) -> str:
+        return __version__
+
+    def can_self_update(self) -> bool:
+        return updater.can_self_update()
+
+    def check_for_update(self) -> UpdateInfo | None:
+        with update_errors():
+            return updater.check(__version__)
+
+    def download_update(self, info: UpdateInfo, progress: ProgressCallback,
+                        cancel: threading.Event) -> Path:
+        dest = self._data_dir / "updates" if self._data_dir else None
+        with update_errors():
+            return updater.download(info, progress, cancel, dest)
+
+    def install_update(self, installer: Path) -> None:
+        with update_errors():
+            updater.install(installer)
