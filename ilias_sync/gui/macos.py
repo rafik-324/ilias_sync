@@ -1,10 +1,10 @@
 """
 macOS Besonderheiten über die Objective-C Laufzeit (ctypes, ohne Zusatzpakete).
 
-Im gebauten .app sorgt LSUIElement dafür, dass kein Dock Icon erscheint. Beim
-Start aus der Entwicklungsumgebung fehlt diese Angabe, deshalb wird dieselbe
-Einstellung hier zur Laufzeit gesetzt. Auf anderen Systemen tun die Funktionen
-nichts.
+Im gebauten .app sorgt LSUIElement dafür, dass zunächst kein Dock Icon erscheint. Solange
+das Hauptfenster offen oder minimiert ist, zeigt die App ein Dock Icon (Wunsch des Nutzers
+2026-10-10, nötig für die Minimieren Animation), danach wieder nur die Menüleiste. Auf
+anderen Systemen tun die Funktionen nichts.
 """
 
 from __future__ import annotations
@@ -18,6 +18,8 @@ log = logging.getLogger(__name__)
 
 IS_MAC = sys.platform == "darwin"
 
+# NSApplicationActivationPolicyRegular: Dock Icon und App Menü
+_POLICY_REGULAR = 0
 # NSApplicationActivationPolicyAccessory: kein Dock Icon, kein App Menü
 _POLICY_ACCESSORY = 1
 
@@ -52,15 +54,23 @@ def _ns_app():
     return _send(cls, "sharedApplication")
 
 
-def hide_dock_icon() -> None:
-    """App nur in der Menüleiste zeigen, ohne Dock Icon (wie LSUIElement)."""
+def _set_policy(policy: int) -> None:
     if not IS_MAC:
         return
     try:
-        _send(_ns_app(), "setActivationPolicy:", _POLICY_ACCESSORY,
-              restype=ctypes.c_bool, argtypes=(ctypes.c_long,))
+        _send(_ns_app(), "setActivationPolicy:", policy, restype=ctypes.c_bool, argtypes=(ctypes.c_long,))
     except Exception:  # noqa: BLE001
-        log.warning("Dock Icon konnte nicht ausgeblendet werden", exc_info=True)
+        log.warning("Dock Icon konnte nicht umgeschaltet werden", exc_info=True)
+
+
+def hide_dock_icon() -> None:
+    """App nur in der Menüleiste zeigen, ohne Dock Icon (wie LSUIElement)."""
+    _set_policy(_POLICY_ACCESSORY)
+
+
+def show_dock_icon() -> None:
+    """Dock Icon zeigen, solange ein Fenster offen ist. Erst damit kann ein Fenster ins Dock minimieren."""
+    _set_policy(_POLICY_REGULAR)
 
 
 def activate_app() -> None:

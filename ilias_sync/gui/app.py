@@ -25,7 +25,7 @@ from ilias_sync.api import home_override
 from ilias_sync.gui import theme
 from ilias_sync.gui.controller import Controller
 from ilias_sync.gui.icons import app_icon
-from ilias_sync.gui.macos import activate_app, hide_dock_icon
+from ilias_sync.gui.macos import activate_app, hide_dock_icon, show_dock_icon
 from ilias_sync.gui.scheduler_gui import Scheduler
 from ilias_sync.gui.setup_wizard import SetupWizard
 from ilias_sync.gui.tray import ZIEL_UEBERSICHT, Tray
@@ -137,6 +137,15 @@ class GuiApp:
         self.controller.check_session()
         self.scheduler.start()
         self.controller.start_update_checks()
+        self._refresh_autostart()
+
+    def _refresh_autostart(self) -> None:
+        """Autostart Eintrag neu schreiben (aktueller Programmpfad, Kennzeichen --autostart)."""
+        try:
+            if self.api.autostart_enabled():
+                self.api.set_autostart(True)
+        except Exception:  # noqa: BLE001
+            log.warning("Autostart Eintrag konnte nicht aktualisiert werden", exc_info=True)
 
     # ---------------- Fenster ----------------
 
@@ -167,6 +176,7 @@ class GuiApp:
         self.wizard = SetupWizard(self.api)
         self.wizard.accepted.connect(self._wizard_done)
         self.wizard.rejected.connect(self.quit)
+        show_dock_icon()
         self.wizard.show()
         activate_app()
         self.wizard.raise_()
@@ -281,6 +291,8 @@ def run(api, argv: list[str] | None = None, show_window: bool = False) -> int:
 
     gui = GuiApp(api)
     holder["gui"] = gui
+    # ⌘Q im App Menü (mit Dock Icon vorhanden) beendet sauber wie "Beenden" im Tray
+    app.aboutToQuit.connect(lambda: gui.quit(force=True))
     gui.start(show_window)
     return app.exec()
 

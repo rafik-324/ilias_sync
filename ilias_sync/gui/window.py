@@ -20,7 +20,7 @@ from ilias_sync import __version__
 from ilias_sync.gui import logic, theme
 from ilias_sync.gui.controller import Controller
 from ilias_sync.gui.icons import IconState, app_icon, brand_app_pixmap, dot, nav_icon
-from ilias_sync.gui.macos import activate_app
+from ilias_sync.gui.macos import activate_app, hide_dock_icon, show_dock_icon
 from ilias_sync.gui.tab_courses import CoursesTab
 from ilias_sync.gui.tab_log import LogTab
 from ilias_sync.gui.tab_overview import OverviewTab
@@ -227,6 +227,11 @@ class MainWindow(QMainWindow):
         self.raise_()
         self.activateWindow()
 
+    def showEvent(self, event) -> None:  # noqa: N802
+        # macOS: Dock Icon, solange das Fenster offen oder minimiert ist (Minimieren Animation)
+        show_dock_icon()
+        super().showEvent(event)
+
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         # Schliessen versteckt nur das Fenster, die App läuft im Tray weiter
         if not self._can_leave(self.current_page()):
@@ -235,3 +240,4 @@ class MainWindow(QMainWindow):
         QSettings().setValue("window/geometry", self.saveGeometry())
         event.ignore()
         self.hide()
+        hide_dock_icon()

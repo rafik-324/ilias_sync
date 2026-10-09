@@ -110,10 +110,11 @@ WINDOWS_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
 
 def autostart_command() -> list[str]:
-    """Programmaufruf für den Autostart: gebaute App direkt, sonst Python mit dem Paket."""
+    """Programmaufruf für den Autostart: gebaute App direkt, sonst Python mit dem Paket.
+    --autostart: nur Menüleiste bzw. Tray, ohne Fenster (ein Start per Doppelklick öffnet das Fenster)."""
     if getattr(sys, "frozen", False):
-        return [sys.executable]
-    return [sys.executable, "-m", "ilias_sync"]
+        return [sys.executable, "--autostart"]
+    return [sys.executable, "-m", "ilias_sync", "--autostart"]
 
 
 def launch_agent_file() -> Path:
