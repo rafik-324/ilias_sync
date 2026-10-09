@@ -378,6 +378,9 @@ Sync läuft immer in einem Worker Thread (`QThread`), die GUI blockiert nie.
   `pyinstaller packaging/ilias_sync_macos.spec --noconfirm --distpath <ordner>/dist --workpath <ordner>/build`.
   Ergebnis `ILIAS Sync.app` (Bundle ID `io.github.rafik-324.ilias-sync`, `LSUIElement`). Autostart erst einschalten, wenn die App an ihrem endgültigen Ort liegt (z. B. `/Applications`), sonst zeigt der LaunchAgent ins Leere
 * **Signatur**: Ad hoc signiert ändert sich die Code Identität mit jedem Build, der Schlüsselbund fragt dann jedes Mal neu. Die Spec signiert deshalb mit einem selbst erstellten Zertifikat "ILIAS Sync Lokal" (Typ Codesignierung, im Anmelde Schlüsselbund), falls vorhanden, sonst ad hoc
+* **Windows**: `packaging/ilias_sync_windows.spec`, gleiche Startdatei. Bauen nach außerhalb von Cloud Ordnern:
+  `python -m PyInstaller packaging\ilias_sync_windows.spec --noconfirm --distpath <ordner>\dist --workpath <ordner>\build`.
+  Ergebnis Ordner `ILIAS Sync` mit `ILIAS Sync.exe` (onedir, ohne Konsolenfenster, etwa 126 MB, unsigniert). Geprüft: `--status` findet Config, Anmeldeinformationsverwaltung und Session. Autostart erst einschalten, wenn der Ordner an seinem endgültigen Ort liegt
 
 
 ## Meilensteine
@@ -392,7 +395,7 @@ Sync läuft immer in einem Worker Thread (`QThread`), die GUI blockiert nie.
 
 Nach jedem Meilenstein lauffähig und getestet, bevor der nächste beginnt.
 
-**Stand**: Meilensteine 1 bis 4 und 6 fertig, macOS Build fertig, Windows Build offen.
+**Stand**: Meilensteine 1 bis 4 und 6 fertig, Builds für macOS und Windows fertig.
 
 * Erster Sync (Index für diesen Uni Ordner leer) nur, wenn es im Uni Ordner keine `NN_semester` bzw. `_ohne_semester` Ordner mit Inhalt gibt, sonst Abbruch mit Hinweis (`sync.occupied_sync_dirs`, `check_first_sync`, `BaseDirCheck.is_empty`). Als Semesterordner zählen nur Namen genau `NN_semester` (ein Ordner wie `02_SEMESTER_alt` gehört dem Nutzer)
 * Kurse ohne Zuordnung bekommen beim Sync `NN_kursname` Ordner (`Mapper.suggest_courses`), gespeichert in der Config. Kurse derselben Veranstaltung ([V], [Ü], [T], Tut Gruppe) teilen sich einen Ordner
