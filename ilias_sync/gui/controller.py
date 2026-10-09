@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from pathlib import Path
 
-from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtCore import QObject, QSettings, QTimer, Signal
 
 from ilias_sync.api import (
     Cancelled,
@@ -25,6 +26,7 @@ from ilias_sync.api import (
     SessionState,
     SyncResult,
     SyncRun,
+    UpdateInfo,
 )
 from ilias_sync.gui import logic
 from ilias_sync.gui.icons import IconState
@@ -34,6 +36,13 @@ log = logging.getLogger(__name__)
 
 UNERWARTET = "Unerwarteter Fehler, Details im Log."
 PROGRESS_INTERVAL_MS = 100   # höchstens 10 Fortschritts Updates pro Sekunde an die Anzeige
+
+# App Updates (GUI_KONTEXT.md 3.5): erste Prüfung 30 s nach dem Start, danach alle 24 Stunden
+UPDATE_FIRST_DELAY_MS = 30_000
+UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000
+# QSettings Schlüssel: zuletzt automatisch gezeigte bzw. mit "Später" vertagte Version
+KEY_UPDATE_VERSION = "updates/shown_version"
+KEY_UPDATE_AT = "updates/shown_at"
 
 
 def error_text(e: Exception) -> str:
@@ -54,6 +63,14 @@ class Controller(QObject):
     login_required = Signal()
     config_changed = Signal()
     files_changed = Signal()               # recent_files / removed_items / changed_items neu laden
+    # App Updates
+    update_changed = Signal()              # update_info hat sich geändert (Tray Eintrag)
+    update_prompt = Signal(object)         # UpdateInfo, automatisch gefunden und Popup fällig
+    update_check_result = Signal(object, str)   # manuelle Prüfung: UpdateInfo oder None, Fehlertext
+    update_download_progress = Signal(object)   # Progress
+    update_downloaded = Signal(object)          # Path des Installers
+    update_download_failed = Signal(str, bool)  # Text, abgebrochen
+    quit_requested = Signal()              # App beenden (nach install_update)
 
     def __init__(self, api, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -77,6 +94,15 @@ class Controller(QObject):
         self._progress_timer.setInterval(PROGRESS_INTERVAL_MS)
         self._progress_timer.timeout.connect(self._flush_progress)
         self._task_kind: str | None = None   # "sync" oder "dry_run"
+
+        self.update_info: UpdateInfo | None = None
+        self.now = datetime.now                # für Tests ersetzbar
+        self._update_check: Task | None = None
+        self._update_check_manual = False
+        self._update_download: Task | None = None
+        self._update_timer = QTimer(self)
+        self._update_timer.setSingleShot(True)
+        self._update_timer.timeout.connect(self._on_update_timer)
         self.reload_config()
 
     # ---------------- Config ----------------
@@ -180,7 +206,7 @@ class Controller(QObject):
         """Startet einen Sync. Gibt False zurück, wenn gerade nicht möglich."""
         if not self.can_sync():
             return False
-        if automatic and (self.paused or self.login_needed):
+        if automatic and (self.paused or self.login_needed or self.updating):
             return False
         log.info("Sync gestartet (%s)", "automatisch" if automatic else "manuell")
         self._start("sync", self.api.sync, automatic)
@@ -324,10 +350,142 @@ class Controller(QObject):
             log.exception("Geänderte Dateien konnten nicht gelesen werden")
             return 0
 
+    # ---------------- App Updates ----------------
+
+    def app_version(self) -> str:
+        try:
+            return self.api.app_version()
+        except Exception:  # noqa: BLE001, Anzeige darf nie abstürzen
+            log.exception("App Version nicht lesbar")
+            return "?"
+
+    def can_self_update(self) -> bool:
+        try:
+            return bool(self.api.can_self_update())
+        except Exception:  # noqa: BLE001
+            log.exception("can_self_update fehlgeschlagen")
+            return False
+
+    @property
+    def checking_update(self) -> bool:
+        return self._update_check is not None
+
+    @property
+    def updating(self) -> bool:
+        """Ein Update wird gerade heruntergeladen."""
+        return self._update_download is not None
+
+    def start_update_checks(self, first_delay_ms: int = UPDATE_FIRST_DELAY_MS) -> None:
+        """Automatische Prüfung: einmal nach first_delay_ms, danach alle 24 Stunden.
+        Ob geprüft wird, entscheidet Config.check_updates erst beim Auslösen."""
+        self._update_timer.start(first_delay_ms)
+
+    def _on_update_timer(self) -> None:
+        self._update_timer.start(UPDATE_INTERVAL_MS)
+        self.check_for_updates(manual=False)
+
+    def check_for_updates(self, manual: bool = False) -> bool:
+        """Fragt den Update Server im Hintergrund. Automatisch nur mit check_updates.
+        Gibt False zurück, wenn nicht geprüft wird. Eine manuelle Prüfung während einer
+        laufenden automatischen bekommt deren Ergebnis."""
+        if self.checking_update:
+            self._update_check_manual |= manual
+            return manual
+        if not manual and (self.config is None or not self.config.check_updates):
+            return False
+        self._update_check_manual = manual
+        self._update_check = run_task(
+            self.api.check_for_update,
+            on_done=self._on_update_checked,
+            on_error=self._on_update_check_failed,
+        )
+        return True
+
+    def _on_update_checked(self, info: UpdateInfo | None) -> None:
+        self._update_check = None
+        self.update_info = info
+        self.update_changed.emit()
+        if info is None:
+            log.info("Update Prüfung: ILIAS Sync ist aktuell")
+        else:
+            log.info("Update verfügbar: %s", info.version)
+        if self._update_check_manual:
+            self.update_check_result.emit(info, "")
+        elif info is not None and self._prompt_due(info.version):
+            self._remember_shown(info.version)
+            self.update_prompt.emit(info)
+
+    def _on_update_check_failed(self, e: Exception) -> None:
+        self._update_check = None
+        # nie als Fehler Benachrichtigung, nur ins Log (bei manueller Prüfung zusätzlich anzeigen)
+        log.warning("Update Prüfung fehlgeschlagen: %s", e)
+        if self._update_check_manual:
+            self.update_check_result.emit(None, error_text(e))
+
+    def _prompt_due(self, version: str) -> bool:
+        settings = QSettings()
+        shown_version = settings.value(KEY_UPDATE_VERSION)
+        shown_at = logic.parse_iso(settings.value(KEY_UPDATE_AT))
+        return logic.update_prompt_due(version, shown_version, shown_at, self.now())
+
+    def _remember_shown(self, version: str) -> None:
+        settings = QSettings()
+        settings.setValue(KEY_UPDATE_VERSION, version)
+        settings.setValue(KEY_UPDATE_AT, self.now().isoformat(timespec="seconds"))
+
+    def snooze_update(self, version: str) -> None:
+        """"Später": dieselbe Version erst nach 24 Stunden wieder automatisch zeigen."""
+        self._remember_shown(version)
+        log.info("Update %s auf später verschoben", version)
+
+    def start_update_download(self, info: UpdateInfo) -> bool:
+        if self.updating:
+            return False
+        log.info("Update %s wird heruntergeladen", info.version)
+        self._update_download = run_task(
+            lambda progress, cancel: self.api.download_update(info, progress, cancel),
+            with_progress=True,
+            on_progress=self.update_download_progress.emit,
+            on_done=self._on_update_downloaded,
+            on_error=self._on_update_download_failed,
+        )
+        self.state_changed.emit()
+        return True
+
+    def cancel_update_download(self) -> None:
+        if self._update_download is not None:
+            log.info("Update Download abgebrochen")
+            self._update_download.cancel()
+
+    def _on_update_downloaded(self, path: Path) -> None:
+        self._update_download = None
+        self.update_downloaded.emit(path)
+        self.state_changed.emit()
+
+    def _on_update_download_failed(self, e: Exception) -> None:
+        self._update_download = None
+        cancelled = isinstance(e, Cancelled)
+        if not cancelled:
+            log.warning("Update Download fehlgeschlagen: %s", e)
+        self.update_download_failed.emit("Download abgebrochen." if cancelled else error_text(e), cancelled)
+        self.state_changed.emit()
+
+    def install_update(self, installer: Path) -> None:
+        """Startet die Installation und beendet danach die App. Wirft IliasSyncError."""
+        self.api.install_update(installer)
+        log.info("Update wird installiert, App wird beendet")
+        self.quit_requested.emit()
+
     # ---------------- Beenden ----------------
 
     def shutdown(self, timeout_ms: int = 5000) -> None:
-        """Laufenden Vorgang abbrechen und kurz warten. .part Dateien sind harmlos."""
+        """Laufende Vorgänge abbrechen und kurz warten. .part Dateien sind harmlos."""
+        self._update_timer.stop()
+        if self._update_check is not None:
+            self._update_check.wait(1000)   # nicht abbrechbar, kurzer Netzwerkaufruf
+        if self._update_download is not None:
+            self._update_download.cancel()
+            self._update_download.wait(timeout_ms)
         if self._task is not None:
             self._task.cancel()
             self._task.wait(timeout_ms)
