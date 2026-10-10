@@ -277,7 +277,8 @@ class Api:
     def can_self_update(self) -> bool: ...
         # False beim Start aus dem Quellcode oder wenn der App Ordner nicht beschreibbar ist
     def check_for_update(self) -> UpdateInfo | None: ...
-        # Netzwerk. None = aktuell. Wirft NetworkError
+        # Netzwerk. None = Server Version gleich der installierten. Auch eine ältere Version
+        # wird geliefert (Zurückrollen eines fehlerhaften Release). Wirft NetworkError
     def download_update(self, info: UpdateInfo, progress: ProgressCallback,
                         cancel: threading.Event) -> Path: ...
         # Netzwerk. Lädt den Installer ins Datenverzeichnis und prüft SHA-256.
@@ -292,7 +293,7 @@ class Api:
 Entscheidung des Nutzers (2026-10-10): Wer die App hat, bekommt alle Updates, ohne Code und ohne Webseite. Die App fragt nach, zeigt ein Popup und installiert auf Wunsch selbst.
 
 * **Server**: `GET https://<webseite>/api/update?platform=mac|win&version=<app_version>` mit Header `X-App-Key`. Antwort JSON `{"version", "notes", "size", "sha256", "published_at"}`, mit `&download=1` zusätzlich `"url"` (signierter Link, 10 Minuten gültig). Ohne gültigen Schlüssel `403`. Der Schlüssel ist ein App Geheimnis in `ilias_sync/updater.py` (kein echter Schutz, hält nur Fremde fern)
-* **Prüfen**: beim Start (nach 30 Sekunden) und danach alle 24 Stunden, nur wenn `Config.check_updates`. Fehler beim Prüfen nur loggen, nie als Fehler Benachrichtigung zeigen
+* **Prüfen**: beim Start (nach 3 Sekunden) und danach alle 24 Stunden, nur wenn `Config.check_updates`. Fehler beim Prüfen nur loggen, nie als Fehler Benachrichtigung zeigen
 * **Popup** (`QMessageBox` bzw. eigener Dialog, nicht modal blockierend für den Sync): Titel "Neues Update verfügbar", Text "ILIAS Sync <version> ist da (du hast <app_version>)." plus `notes`. Knöpfe **Jetzt installieren** und **Später**. "Später" fragt erst beim nächsten Start bzw. nach 24 Stunden erneut. Je Version höchstens einmal pro Tag zeigen
 * **Installieren**: Fortschritt im Dialog (`download_update` im Worker, abbrechbar). Läuft gerade ein Sync, erst danach installieren (Knopf bis dahin deaktiviert mit Hinweis). Danach `install_update` und sofort `QApplication.quit()`. Ist `can_self_update()` falsch: statt "Jetzt installieren" Hinweis "Update bitte manuell installieren" ohne Knopf
 * **Tray Menü**: steht ein Update bereit, über "Jetzt synchronisieren" ein Eintrag **Update auf <version> installieren …**, öffnet das Popup

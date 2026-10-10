@@ -138,7 +138,7 @@ def test_timer_startet_pruefung_und_danach_taeglich(qtbot, tmp_path):
     qtbot.waitUntil(lambda: calls == [False], timeout=2000)
     assert c._update_timer.isActive()
     assert c._update_timer.interval() == controller_mod.UPDATE_INTERVAL_MS
-    assert controller_mod.UPDATE_FIRST_DELAY_MS == 30_000
+    assert controller_mod.UPDATE_FIRST_DELAY_MS == 3_000
     c.shutdown()
     assert not c._update_timer.isActive()
 

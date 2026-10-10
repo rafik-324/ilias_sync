@@ -116,8 +116,10 @@ def test_check_newer(server):
 def test_check_current(server):
     server["manifest"] = manifest("0.1.0", published_at=None)
     assert updater.check("0.1.0") is None
+    # ältere Version auf dem Server wird angeboten (Zurückrollen eines fehlerhaften Release)
     server["manifest"] = manifest("0.0.9")
-    assert updater.check("0.1.0") is None
+    info = updater.check("0.1.0")
+    assert info is not None and info.version == "0.0.9"
 
 
 @pytest.mark.parametrize("status", [403, 404])
@@ -384,9 +386,15 @@ def test_cli_check_update(server, capsys, monkeypatch, tmp_path):
     assert cli.main(["--check-update"]) == 0
     out = capsys.readouterr().out
     assert "Update verfügbar: 99.0.0" in out and "Neu: Updates" in out
-    server["manifest"] = manifest("0.0.1")
+    # gleiche Version wie installiert: aktuell
+    from ilias_sync import __version__
+    server["manifest"] = manifest(__version__)
     assert cli.main(["--check-update"]) == 0
     assert "aktuell (" in capsys.readouterr().out
+    # ältere Version: wird angeboten (Zurückrollen)
+    server["manifest"] = manifest("0.0.1")
+    assert cli.main(["--check-update"]) == 0
+    assert "Update verfügbar: 0.0.1" in capsys.readouterr().out
 
 
 def _load(name):

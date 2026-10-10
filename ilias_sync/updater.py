@@ -69,6 +69,11 @@ def is_newer(remote: str, local: str) -> bool:
     return parse_version(remote) > parse_version(local)
 
 
+def is_different(remote: str, local: str) -> bool:
+    """Andere Version als die installierte, auch eine ältere (Zurückrollen, Wunsch des Nutzers 2026-10-10)."""
+    return parse_version(remote) != parse_version(local)
+
+
 def installer_name(version: str, platform: str) -> str:
     if platform == "mac":
         return f"ILIAS-Sync-{version}.dmg"
@@ -147,11 +152,12 @@ def _info(data: dict) -> UpdateInfo:
 # ---------------- Prüfen ----------------
 
 def check(current: str = __version__) -> UpdateInfo | None:
-    """Neuere Version auf dem Server oder None, wenn die App aktuell ist."""
+    """Andere Version auf dem Server (neuer oder älter) oder None, wenn sie der installierten entspricht.
+    Eine ältere Version wird angeboten, damit ein fehlerhaftes Release zurückgenommen werden kann."""
     data = fetch_manifest(current)
     if data is None:
         return None
-    if not is_newer(data["version"], current):
+    if not is_different(data["version"], current):
         log.info("Updates: aktuell (%s, Server %s)", current, data["version"])
         return None
     log.info("Updates: Version %s verfügbar (installiert %s)", data["version"], current)

@@ -37,8 +37,8 @@ log = logging.getLogger(__name__)
 UNERWARTET = "Unerwarteter Fehler, Details im Log."
 PROGRESS_INTERVAL_MS = 100   # höchstens 10 Fortschritts Updates pro Sekunde an die Anzeige
 
-# App Updates (GUI_KONTEXT.md 3.5): erste Prüfung 30 s nach dem Start, danach alle 24 Stunden
-UPDATE_FIRST_DELAY_MS = 30_000
+# App Updates (GUI_KONTEXT.md 3.5): erste Prüfung 3 s nach dem Start, danach alle 24 Stunden
+UPDATE_FIRST_DELAY_MS = 3_000
 UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000
 # QSettings Schlüssel: zuletzt automatisch gezeigte bzw. mit "Später" vertagte Version
 KEY_UPDATE_VERSION = "updates/shown_version"
