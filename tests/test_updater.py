@@ -302,6 +302,8 @@ def test_mac_script_quotes_paths(tmp_path):
     assert "DMG='/Users/max/Library/Application Support/ilias-sync/updates/ILIAS-Sync-0.2.0.dmg'" in text
     assert "hdiutil attach -nobrowse -readonly" in text and "ditto" in text and ".Trash" in text
     assert "xattr -dr com.apple.quarantine" in text and 'open "$APP"' in text
+    # hängt die App beim Beenden, beendet das Skript sie selbst statt das Update abzubrechen
+    assert 'kill -TERM "$PID"' in text and 'kill -KILL "$PID"' in text
     # Nur Syntax prüfen, nichts ausführen
     script = tmp_path / "s.sh"
     script.write_text(text, encoding="utf-8")
@@ -316,6 +318,7 @@ def test_win_script_quotes_paths():
                               Path("C:/Daten/log.txt"), "ILIAS Sync.exe")
     a = str(app).replace("'", "''")
     assert "$AppPid = 4242" in text
+    assert "Stop-Process -Id $AppPid -Force" in text
     assert f"$App = '{a}'" in text
     assert f"$Neu = '{a}.neu'" in text and f"$Alt = '{a}.alt'" in text
     assert "Expand-Archive -LiteralPath $Zip" in text

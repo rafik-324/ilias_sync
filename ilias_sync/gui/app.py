@@ -13,7 +13,9 @@ import argparse
 import getpass
 import hashlib
 import logging
+import os
 import sys
+import threading
 from logging.handlers import RotatingFileHandler
 
 from PySide6.QtCore import QCoreApplication, QTimer
@@ -257,10 +259,24 @@ class GuiApp:
                 return
         self._quitting = True
         log.info("Beenden")
+        # Sicherheitsnetz: hängt das Beenden (z. B. ein Netzwerkaufruf in einem Thread), endet der
+        # Prozess trotzdem. Sonst blockiert er jeden Neustart und ein Update (Test Mac 2026-10-10)
+        watchdog = threading.Timer(QUIT_WATCHDOG_S, _hard_exit)
+        watchdog.daemon = True
+        watchdog.start()
         self.scheduler.stop()
         self.controller.shutdown()
         self.tray.hide()
         QApplication.quit()
+
+
+QUIT_WATCHDOG_S = 15
+
+
+def _hard_exit() -> None:
+    log.warning("Beenden hängt, Prozess wird hart beendet")
+    logging.shutdown()
+    os._exit(0)
 
 
 def run(api, argv: list[str] | None = None, show_window: bool = False) -> int:

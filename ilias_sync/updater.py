@@ -287,11 +287,18 @@ fail() {{
     exit 1
 }}
 
-# Auf das Ende der App warten (höchstens {WAIT_SECONDS} Sekunden)
+# Auf das Ende der App warten (höchstens {WAIT_SECONDS} Sekunden). Hängt sie beim Beenden,
+# selbst beenden: erst freundlich (TERM), dann hart (KILL). Der Nutzer hat das Update gewählt
 i=0
 while kill -0 "$PID" 2>/dev/null; do
     i=$((i + 1))
-    if [ "$i" -gt {WAIT_SECONDS * 2} ]; then
+    if [ "$i" -eq {WAIT_SECONDS * 2} ]; then
+        log "App läuft noch, wird beendet"
+        kill -TERM "$PID" 2>/dev/null
+    elif [ "$i" -eq {WAIT_SECONDS * 2 + 10} ]; then
+        log "App reagiert nicht, wird hart beendet"
+        kill -KILL "$PID" 2>/dev/null
+    elif [ "$i" -gt {WAIT_SECONDS * 2 + 20} ]; then
         log "App läuft noch, Update abgebrochen"
         exit 1
     fi
@@ -352,7 +359,14 @@ function Write-Log($Text) {{
 # Auf das Ende der App warten (höchstens {WAIT_SECONDS} Sekunden)
 $deadline = (Get-Date).AddSeconds({WAIT_SECONDS})
 while (Get-Process -Id $AppPid -ErrorAction SilentlyContinue) {{
-    if ((Get-Date) -gt $deadline) {{ Write-Log 'App läuft noch, Update abgebrochen'; exit 1 }}
+    if ((Get-Date) -gt $deadline) {{
+        # hängt die App beim Beenden: selbst beenden, der Nutzer hat das Update gewählt
+        Write-Log 'App läuft noch, wird beendet'
+        Stop-Process -Id $AppPid -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 3
+        if (Get-Process -Id $AppPid -ErrorAction SilentlyContinue) {{ Write-Log 'App läuft noch, Update abgebrochen'; exit 1 }}
+        break
+    }}
     Start-Sleep -Milliseconds 500
 }}
 Start-Sleep -Seconds 1

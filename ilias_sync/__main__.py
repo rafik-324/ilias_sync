@@ -547,7 +547,11 @@ def main(argv: list[str] | None = None) -> int:
         from .gui.app import run
 
         # Start per Doppelklick (Finder, Startmenü): Fenster öffnen. Autostart: nur Menüleiste
-        return run(Api(), show_window=not args.autostart)
+        code = run(Api(), show_window=not args.autostart)
+        # Direkt beenden, ohne Aufräumen beim Python Ende: noch laufende Threads (z. B. ein
+        # Netzwerkaufruf) dürfen den Prozess nicht am Leben halten (Update wartet auf sein Ende)
+        logging.shutdown()
+        os._exit(code)
 
     if args.login:
         return cmd_login()
