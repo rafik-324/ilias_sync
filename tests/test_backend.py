@@ -8,7 +8,7 @@ import requests
 
 from ilias_sync import auth, backend, config, crawler
 from ilias_sync.api import (
-    Api, Cancelled, Config, ConfigError, CourseConfig, IliasCourse, InvalidCredentialsError, ItemStatus,
+    Api, Cancelled, Config, ConfigError, CourseConfig, IliasCourse, IliasSyncError, InvalidCredentialsError, ItemStatus,
     NetworkError, SessionState,
 )
 from ilias_sync.crawler import Course, CrawlResult, IliasObject
@@ -36,10 +36,13 @@ class FakeSession:
         return response(self.files.get(url, b"%PDF"))
 
 
-def crawl_result(size=10, mtime=datetime(2026, 9, 1, 12, 0)) -> CrawlResult:
+def crawl_result(size=10, mtime=datetime(2026, 9, 1, 12, 0), extra=False) -> CrawlResult:
     folder = IliasObject("fold", 200, "Vorlesung", "https://ilias/fold/200", path=[COURSE.name])
     file = IliasObject("file", 300, "skript.pdf", "u300", path=[COURSE.name, "Vorlesung"], size=size, mtime=mtime)
-    return CrawlResult(courses=[COURSE], objects={COURSE.ref_id: [folder, file]})
+    objects = [folder, file]
+    if extra:
+        objects.append(IliasObject("file", 301, "folien.pdf", "u301", path=[COURSE.name, "Vorlesung"], size=5))
+    return CrawlResult(courses=[COURSE], objects={COURSE.ref_id: objects})
 
 
 @pytest.fixture
@@ -276,10 +279,13 @@ def test_dismiss_changed(env, monkeypatch):
     assert api.sync(noop, threading.Event()).changed_files == []
 
 
-def test_removed_and_redownload(env):
+def test_removed_and_redownload(env, monkeypatch):
     api, base, passwords, session = env
     setup_account(api, base, passwords)
-    path = api.sync(noop, threading.Event()).new_files[0].local_path
+    # Zweite Datei bleibt liegen, sonst gälte der ganze Kurs als neu zu laden
+    monkeypatch.setattr(api, "_crawl", lambda cfg, s, progress, cancel: crawl_result(extra=True))
+    new = api.sync(noop, threading.Event()).new_files
+    path = next(f.local_path for f in new if f.ref_id == 300)
     path.unlink()
     api.sync(noop, threading.Event())
     assert [f.ref_id for f in api.removed_items()] == [300]
@@ -402,3 +408,41 @@ def test_sync_result_is_logged(env, caplog, monkeypatch):
     with caplog.at_level("INFO", logger="ilias_sync.backend"), pytest.raises(Cancelled):
         api.sync(noop, threading.Event())
     assert any("Sync abgebrochen nach" in r.message for r in caplog.records)
+
+
+def test_reset_local_state_keeps_files_and_backs_up_config(env):
+    api, base, passwords, session = env
+    setup_account(api, base, passwords)
+    downloaded = api.sync(noop, threading.Event()).new_files[0].local_path
+    api._cookie_path.write_text("cookies")
+    (api._data_dir / "andere_datei.txt").write_text("bleibt")
+    assert list(api._data_dir.glob("index_*.sqlite3"))
+
+    backup = api.reset_local_state()
+    assert backup is not None and backup.exists() and "nutzer1" in backup.read_text()
+    assert not api._config_path.exists() and not api.config_exists()
+    assert not list(api._data_dir.glob("index_*.sqlite3"))
+    assert not api._cookie_path.exists()
+    assert (api._data_dir / "andere_datei.txt").exists()
+    assert downloaded.exists()                       # heruntergeladene Dateien bleiben
+    assert passwords == {"nutzer1": "geheim"}        # Passwort nur auf Wunsch
+
+
+def test_reset_local_state_can_forget_password(env):
+    api, base, passwords, session = env
+    setup_account(api, base, passwords)
+    api.reset_local_state(forget_password=True)
+    assert passwords == {}
+    assert api.reset_local_state() is None           # zweites Mal: nichts mehr zu sichern
+
+
+def test_course_list_not_found_is_shown_as_error(env, monkeypatch):
+    api, base, passwords, session = env
+    setup_account(api, base, passwords)
+
+    def missing(cfg, s, progress, cancel):
+        raise crawler.CourseListNotFound("Die Liste 'Meine Kurse und Gruppen' wurde in ILIAS nicht gefunden.")
+
+    monkeypatch.setattr(api, "_crawl", missing)
+    with pytest.raises(IliasSyncError, match="nicht gefunden"):
+        api.sync(noop, threading.Event())

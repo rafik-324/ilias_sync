@@ -18,7 +18,7 @@ from pathlib import Path
 import requests
 from bs4 import BeautifulSoup
 
-from . import auth, config, crawler, downloader, mapper, state, sync
+from . import auth, config, crawler, debug, downloader, mapper, state, sync
 from .api import ActionKind, Config, ConfigError
 
 log = logging.getLogger(config.APP_NAME)
@@ -40,6 +40,8 @@ def setup_logging(verbose: bool = False) -> Path:
     root.addHandler(console)
     # urllib3 loggt auf DEBUG vollständige URLs, die Session Daten enthalten können
     logging.getLogger("urllib3").setLevel(logging.WARNING)
+    if debug_file := debug.setup(log_dir):
+        log.info("Debug Modus an, Debug Log: %s", debug_file)
     return log_file
 
 
@@ -122,7 +124,9 @@ def cmd_status() -> int:
     print("Programm:", sys.executable, "(gebaut)" if getattr(sys, "frozen", False) else "")
     print("Config:", config.config_file())
     print("Uni Ordner:", api.root_dir() or "noch nicht eingerichtet")
+    print("Daten (Index, Cookies):", config.data_dir())
     print("Log:", api.log_file())
+    print("Debug Modus:", "an" if debug.enabled() else f"aus (einschalten mit --debug oder {debug.DEBUG_ENV}=1)")
     print("Schlüsselbund:", type(keyring.get_keyring()).__module__)
     print("Uni-ID:", api.stored_username() or "keine")
     print("Passwort gespeichert:", "ja" if api.has_stored_password() else "nein")
@@ -192,7 +196,7 @@ def run_crawl(cfg: Config, s: requests.Session, course_ids: list[int]) -> crawle
     except KeyboardInterrupt:
         print("\nAbgebrochen.")
         return None
-    except crawler.SessionExpired as e:
+    except (crawler.SessionExpired, crawler.CourseListNotFound) as e:
         print("\nFEHLER:", e)
         return None
     except requests.RequestException as e:
@@ -427,7 +431,9 @@ def cmd_sync(dry_run: bool, output: Path | None) -> int:
         print("FEHLER: In der Config fehlt general.base_dir (Basispfad).")
         return 1
     root = cfg.base_dir / cfg.root_folder_name
-    with state.State(state.db_file(config.data_dir(), root)) as st:
+    index_path = state.db_file(config.data_dir(), root)
+    debug.describe_paths(config.config_file(), config.data_dir(), auth.cookie_file(), root, index_path)
+    with state.State(index_path) as st:
         if problem := sync.check_first_sync(st, root):
             print("FEHLER:", problem)
             return 1
@@ -445,7 +451,7 @@ def cmd_sync(dry_run: bool, output: Path | None) -> int:
         if suggestions and not dry_run:
             config.save_config(cfg)
         mapping = mapper.Mapper(cfg, root).map_crawl(result)
-        problems: list[str] = []
+        problems: list[str] = list(mapping.errors)
         jobs = sync.plan(mapping, st, root, cfg, problems)
         lines = format_plan(jobs, root, suggestions, sync.unassigned_courses(mapping))
         if problems:
@@ -489,6 +495,34 @@ def cmd_sync(dry_run: bool, output: Path | None) -> int:
         return 0 if not sync_result.errors else 2
 
 
+def cmd_reset_state(yes: bool, forget_password: bool) -> int:
+    """Index, Cookies und Config zurücksetzen wie bei einer frischen Installation. Dateien bleiben."""
+    from .api import Api, IliasSyncError
+
+    print("Zurücksetzen löscht den Index (welche Dateien schon geladen sind) und die Cookies,")
+    print("die Config wird gesichert und danach startet der Einrichtungsassistent neu.")
+    print("Heruntergeladene Dateien bleiben unberührt. Für den nächsten Sync danach einen neuen,")
+    print("leeren Uni Ordner wählen, sonst landen vorhandene Dateien als _ilias_<Datum> doppelt daneben.")
+    print("  Config:", config.config_file())
+    print("  Daten: ", config.data_dir())
+    if not yes:
+        if not sys.stdin or not sys.stdin.isatty():
+            print("FEHLER: Ohne Eingabemöglichkeit bitte mit --yes bestätigen.")
+            return 1
+        if input("Wirklich zurücksetzen? [j/N] ").strip().lower() != "j":
+            print("Nichts geändert.")
+            return 1
+    try:
+        backup = Api().reset_local_state(forget_password=forget_password)
+    except IliasSyncError as e:
+        print("FEHLER:", e)
+        return 1
+    print("Zurückgesetzt." + (f" Config gesichert als: {backup}" if backup else ""))
+    if forget_password:
+        print("Passwort aus dem Schlüsselbund gelöscht.")
+    return 0
+
+
 def cmd_check_update() -> int:
     from . import __version__, updater
     from .api import IliasSyncError
@@ -523,11 +557,18 @@ def main(argv: list[str] | None = None) -> int:
     group.add_argument("--sync", action="store_true",
                        help="echter Sync in den Uni Ordner aus der Config (erster Sync nur in leeren Ordner)")
     group.add_argument("--check-update", action="store_true", help="nach einer neuen App Version fragen")
+    group.add_argument("--reset-state", action="store_true",
+                       help="Index, Cookies und Config zurücksetzen (Config wird gesichert, Dateien bleiben)")
     parser.add_argument("--videos", action="store_true", help="beim Test Sync auch Videos laden")
     parser.add_argument("--course", type=int, action="append", default=[], metavar="REF_ID",
                         help="nur diesen Kurs crawlen (mehrfach möglich)")
     parser.add_argument("--output", type=Path, metavar="DATEI", help="Ausgabe zusätzlich in Datei speichern")
     parser.add_argument("-v", "--verbose", action="store_true", help="ausführliche Ausgabe")
+    parser.add_argument("--debug", action="store_true",
+                        help=f"Debug Log {debug.DEBUG_FILE_NAME} im Log Ordner schreiben (wie {debug.DEBUG_ENV}=1)")
+    parser.add_argument("--yes", action="store_true", help="bei --reset-state nicht nachfragen")
+    parser.add_argument("--forget-password", action="store_true",
+                        help="bei --reset-state auch das Passwort aus dem Schlüsselbund löschen")
     parser.add_argument("--autostart", action="store_true",
                         help="Start durch den Autostart: nur Menüleiste bzw. Tray, ohne Fenster")
     parser.add_argument("--config-dir", type=Path, metavar="ORDNER",
@@ -537,11 +578,13 @@ def main(argv: list[str] | None = None) -> int:
         # Vor allem anderen setzen, alle Pfade werden bei Bedarf daraus gelesen
         os.environ[config.HOME_ENV] = str(args.config_dir.expanduser().resolve())
 
+    if args.debug:
+        debug.enable()
     log_file = setup_logging(args.verbose)
     log.debug("Log Datei: %s", log_file)
 
     if not any((args.login, args.logout, args.status, args.crawl, args.test_sync, args.dry_run, args.sync,
-                args.check_update)):
+                args.check_update, args.reset_state)):
         # Ohne Argumente: App mit Menüleisten bzw. Tray Icon starten
         from .api import Api
         from .gui.app import run
@@ -559,6 +602,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_status()
     if args.check_update:
         return cmd_check_update()
+    if args.reset_state:
+        return cmd_reset_state(args.yes, args.forget_password)
     if args.crawl:
         return cmd_crawl(args.course, args.output)
     if args.test_sync:

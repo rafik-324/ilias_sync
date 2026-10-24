@@ -24,7 +24,7 @@ from pathlib import Path
 
 import requests
 
-from .auth import TIMEOUT
+from .auth import TIMEOUT, session_lock
 from .crawler import Throttle
 from .platform_utils import fit_path
 
@@ -71,7 +71,8 @@ def fetch_to_part(
     for attempt in (1, 2):
         if throttle:
             throttle.wait()
-        with session.get(url, stream=True, timeout=TIMEOUT) as r:
+        # Eine Session, ein Request zur Zeit (auch während der Datei Inhalt fließt)
+        with session_lock(session), session.get(url, stream=True, timeout=TIMEOUT) as r:
             r.raise_for_status()
             if _looks_like_login_page(r, name_hint):
                 if attempt == 1 and relogin is not None:

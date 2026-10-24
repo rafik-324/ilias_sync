@@ -6,6 +6,9 @@ Regeln laut CLAUDE.md "Download und Sicherheitsregeln" (schmal, kein Inhaltsverg
   * Nicht im Index, Ziel belegt:               CONFLICT, vorhandene Datei bleibt, ILIAS Datei
                                                kommt als <name>_ilias_<Datum> daneben
   * Im Index, lokale Datei fehlt:              SKIP_REMOVED, als user_removed merken, nie neu laden
+  * Im Index, aber keine einzige Datei des
+    Kurses liegt noch lokal:                   Index veraltet (Kurs oder Uni Ordner weg, z. B. nach
+                                               Neuinstallation), wie nicht im Index behandeln
   * Im Index, in ILIAS unverändert:            nichts
   * Im Index, in ILIAS geändert:               CHANGED, nicht laden, nur als ilias_changed melden.
                                                Der Nutzer lädt per download_changed (als
@@ -19,7 +22,9 @@ from __future__ import annotations
 
 import logging
 import threading
+import traceback
 import unicodedata
+from collections import Counter
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -28,7 +33,7 @@ from pathlib import Path, PurePosixPath
 
 import requests
 
-from . import downloader, mapper
+from . import debug, downloader, mapper
 from .api import (
     ActionKind, ChangedFile, Config, DownloadedFile, IliasCourse, ItemStatus, PlannedAction, Progress, SyncResult,
     SyncRun,
@@ -83,38 +88,95 @@ def ilias_changed(entry: Item, item: MappedItem) -> bool:
     return obj.size is not None and size is not None and obj.size != size
 
 
+def stale_courses(index: dict[int, Item], root: Path) -> set[int]:
+    """Kurse, deren Index Einträge alle ins Leere zeigen: keine einzige als geladen vermerkte
+    Datei des Kurses liegt noch im Uni Ordner. Dann hat nicht der Nutzer einzelne Dateien
+    entfernt, sondern Kursordner oder Uni Ordner sind weg (z. B. Neuinstallation und neu
+    angelegter Ordner unter demselben Pfad, der Index im Datenverzeichnis blieb erhalten).
+    Solche Einträge gelten als veraltet, die Dateien werden neu geladen. Einzelne entfernte
+    Dateien in einem sonst vorhandenen Kurs bleiben user_removed."""
+    present: dict[int, bool] = {}
+    for entry in index.values():
+        if entry.status == ItemStatus.ERROR or present.get(entry.course_ref_id):
+            continue
+        try:
+            present[entry.course_ref_id] = str_to_path(root, entry.local_path).is_file()
+        except OSError:
+            present[entry.course_ref_id] = False
+    return {ref_id for ref_id, found in present.items() if not found}
+
+
 def plan(mapping: MappingResult, st: State, root: Path, cfg: Config, problems: list[str] | None = None) -> list[Job]:
     """Aktionen für alle gewünschten Dateien. Liest Dateisystem und Index, schreibt nichts.
     Dateien, die nicht ablegbar sind (Pfad zu lang), landen als Text in problems."""
     index = st.all_items()
+    stale = stale_courses(index, root)
+    if stale:
+        log.info("Index veraltet für %d Kurse (keine geladene Datei mehr vorhanden), Dateien werden neu geladen",
+                 len(stale))
     jobs: list[Job] = []
     for item in mapping.items:
         if not wanted(item, cfg):
             continue
-        entry = index.get(item.obj.ref_id)
-        if entry is not None and entry.status != ItemStatus.ERROR:
-            local = str_to_path(root, entry.local_path)
-            if entry.status == ItemStatus.USER_REMOVED:
-                jobs.append(Job(ActionKind.SKIP_REMOVED, item, local, entry))
-            elif not local.is_file():
-                jobs.append(Job(ActionKind.SKIP_REMOVED, item, local, entry, mark_removed=True))
-            elif entry.status == ItemStatus.ILIAS_CHANGED or ilias_changed(entry, item):
-                jobs.append(Job(ActionKind.CHANGED, item, local, entry))
-            continue
         try:
-            target = fit_path(root.joinpath(*item.rel_path))
-        except ValueError:
-            wanted_target = root.joinpath(*item.rel_path)
-            text = too_long_text(wanted_target, item)
+            job = _plan_item(item, index.get(item.obj.ref_id), stale, root, problems)
+        except OSError as e:
+            # Ein nicht lesbarer Zielordner betrifft nur diese Datei
+            text = f"{'/'.join(item.rel_path)}: Zielordner nicht lesbar ({e.strerror or type(e).__name__})"
             log.warning("Übersprungen: %s", text)
             if problems is not None:
                 problems.append(text)
-            # In der Vorschau sichtbar, beim Sync nur als Fehler gemeldet
-            jobs.append(Job(ActionKind.SKIP_TOO_LONG, item, wanted_target, entry))
             continue
-        kind = ActionKind.CONFLICT if target.exists() else ActionKind.NEW
-        jobs.append(Job(kind, item, target, entry))
+        if job is not None:
+            jobs.append(job)
+    _debug_plan(index, stale, jobs, mapping, root)
     return jobs
+
+
+def _plan_item(item: MappedItem, entry: Item | None, stale: set[int], root: Path,
+               problems: list[str] | None) -> Job | None:
+    if entry is not None and entry.status != ItemStatus.ERROR and entry.course_ref_id not in stale:
+        local = str_to_path(root, entry.local_path)
+        if entry.status == ItemStatus.USER_REMOVED:
+            return Job(ActionKind.SKIP_REMOVED, item, local, entry)
+        if not local.is_file():
+            return Job(ActionKind.SKIP_REMOVED, item, local, entry, mark_removed=True)
+        if entry.status == ItemStatus.ILIAS_CHANGED or ilias_changed(entry, item):
+            return Job(ActionKind.CHANGED, item, local, entry)
+        return None
+    try:
+        target = fit_path(root.joinpath(*item.rel_path))
+    except ValueError:
+        wanted_target = root.joinpath(*item.rel_path)
+        text = too_long_text(wanted_target, item)
+        log.warning("Übersprungen: %s", text)
+        if problems is not None:
+            problems.append(text)
+        # In der Vorschau sichtbar, beim Sync nur als Fehler gemeldet
+        return Job(ActionKind.SKIP_TOO_LONG, item, wanted_target, entry)
+    kind = ActionKind.CONFLICT if target.exists() else ActionKind.NEW
+    return Job(kind, item, target, entry)
+
+
+def _debug_plan(index: dict[int, Item], stale: set[int], jobs: list[Job], mapping: MappingResult,
+                root: Path) -> None:
+    """Pro Kurs: was der Index weiß und was geplant ist. Zeigt veraltete Index Einträge sofort."""
+    if not debug.enabled():
+        return
+    indexed = Counter(e.course_ref_id for e in index.values())
+    removed = Counter(e.course_ref_id for e in index.values() if e.status == ItemStatus.USER_REMOVED)
+    planned: dict[int, Counter] = {}
+    for job in jobs:
+        planned.setdefault(job.item.course.ref_id, Counter())[job.kind.value] += 1
+    debug.log.info("Plan für %s: %d Einträge im Index", root, len(index))
+    for cm in mapping.courses:
+        ref_id = cm.course.ref_id
+        debug.log.info("  Kurs %s (%s) -> %s/%s [%s]: Index %d (davon user_removed %d)%s, geplant %s",
+                       ref_id, cm.course.name, cm.semester_dir, cm.course_dir, cm.source, indexed[ref_id],
+                       removed[ref_id], ", VERALTET, wird neu geladen" if ref_id in stale else "",
+                       dict(planned.get(ref_id, {})) or "nichts")
+    for error in mapping.errors:
+        debug.log.warning("  %s", error)
 
 
 def too_long_text(target: Path, item: MappedItem) -> str:
@@ -192,6 +254,18 @@ def run_job(job: Job, session: requests.Session, throttle: Throttle | None, relo
     """Eine Aktion ausführen (NEW oder CONFLICT). Wirft nie, Fehler stehen im Ergebnis."""
     if cancel.is_set():
         return Outcome(job, "abgebrochen")
+    try:
+        return _run_job(job, session, throttle, relogin, today)
+    except Exception as e:
+        # Unerwarteter Fehler bei einer Datei: nur diese Datei schlägt fehl
+        log.warning("Download fehlgeschlagen (%s): %s", job.target.name, type(e).__name__)
+        debug.log.error("Download fehlgeschlagen (%s):\n%s", ilias_path(job.item),
+                        "".join(traceback.format_exception(e)))
+        return Outcome(job, "fehler", error="Unerwarteter Fehler, Details im Log")
+
+
+def _run_job(job: Job, session: requests.Session, throttle: Throttle | None, relogin: Callable[[], None] | None,
+             today: date) -> Outcome:
     url = job.item.obj.url
     target = job.target
     if job.kind == ActionKind.CONFLICT:
@@ -279,6 +353,15 @@ def execute(
         st.finish_run(run_id, run)
 
     errors = [*(extra_errors or []), *(f"{o.job.target.name}: {o.error}" for o in outcomes if o.status == "fehler")]
+    if debug.enabled():
+        per_course: dict[str, Counter] = {}
+        for o in outcomes:
+            per_course.setdefault(o.job.item.course.name, Counter())[o.status] += 1
+        for name, counts in per_course.items():
+            debug.log.info("Ergebnis %s: %s", name, dict(counts))
+        for o in outcomes:
+            if o.status == "fehler":
+                debug.log.warning("  Fehler %s: %s", ilias_path(o.job.item), o.error)
     unassigned = [IliasCourse(cm.course.ref_id, cm.course.name, cm.semester, cm.course.url)
                   for cm in unassigned_courses(mapping)]
     return SyncResult(run, new_files, unassigned, errors, changed), outcomes

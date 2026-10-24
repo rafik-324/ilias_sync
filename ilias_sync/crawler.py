@@ -6,8 +6,11 @@ echte Seiten (Fixtures unter tests/fixtures/). Der Crawler liest nur, er lädt
 keine Dateien herunter.
 
 Merkmale der Seiten:
-  * Dashboard: Panel "Meine Kurse und Gruppen", je Semester eine
-    .il-item-group mit h3, je Kurs ein .il-std-item mit Link goto.php/crs/<ref_id>
+  * Dashboard: Panel "Meine Kurse und Gruppen", erkannt an den Aktionen von
+    ilMembershipBlockGUI (sprachunabhängig, die Überschrift nur als Rückfall). Je Semester
+    eine .il-item-group mit h3, je Kurs ein .il-std-item (Listenansicht) bzw. eine
+    .il-card (Kachelansicht) mit Link goto.php/crs/<ref_id>. Aufgerufen werden Kurse
+    danach immer über ihren Permalink aus der ref_id, nie über Dashboard Links
   * Container (Kurs, Gruppe, Ordner ...): je Objekt ein div.ilContainerListItemOuter
     mit data-list-item-id="lg_div_<ref_id>_pref_<parent>", Titel Link
     a.il_ContainerItemTitle und Eigenschaften span.il_ItemProperty (bei Dateien:
@@ -21,6 +24,7 @@ import logging
 import re
 import threading
 import time
+import traceback
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field, replace
@@ -30,9 +34,12 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup, Tag
 
-from .auth import ILIAS, TIMEOUT, is_logged_in, safe_url
+from . import debug
+from .auth import ILIAS, TIMEOUT, is_logged_in, safe_url, session_lock
 
 DASHBOARD = ILIAS + "/ilias.php?baseClass=ilDashboardGUI"
+# Eigene Seite "Meine Kurse und Gruppen", Rückfall, wenn der Block auf dem Dashboard fehlt
+MEMBERSHIP_OVERVIEW = ILIAS + "/ilias.php?baseClass=ilMembershipOverviewGUI"
 DEFAULT_SEMESTER_PATTERN = r"\((HWS|FSS) (\d{4})\)"
 # Mindestabstand zwischen zwei Seitenabrufen in Sekunden, auch bei Parallelität (Server schonen)
 DEFAULT_DELAY = 0.5
@@ -67,6 +74,10 @@ TYPE_NAMES = {
 }
 
 MY_COURSES_HEADINGS = ("meine kurse und gruppen", "my courses and groups")
+# Aktionen des Blocks (Sortierung, Favoriten ...) zeigen auf diese GUI Klasse, in jeder Sprache
+MEMBERSHIP_BLOCK_RE = re.compile(r"ilmembershipblockgui", re.IGNORECASE)
+# Titel Links von Kursen: Listenansicht und Kachelansicht
+COURSE_TITLE_SELECTOR = ".il-item-title a[href], .card-title a[href], .il-card .caption a[href]"
 
 GOTO_RE = re.compile(r"goto\.php(?:/|\?target=)([a-z]+)[/_](\d+)")
 # data-list-item-id="lg_div_<ref_id>_pref_<parent_ref_id>"
@@ -143,6 +154,11 @@ def parse_goto(url: str) -> tuple[str, int] | None:
     return (m.group(1), int(m.group(2))) if m else None
 
 
+def permalink(obj_type: str, ref_id: int) -> str:
+    """Stabiler Einstieg in ein Objekt, unabhängig von Dashboard Links und Navigation."""
+    return f"{ILIAS}/goto.php?target={obj_type}_{ref_id}"
+
+
 def parse_size(text: str) -> int | None:
     """"4.47 MB" -> Bytes. ILIAS zeigt gerundete Werte, das Ergebnis ist ungefähr."""
     m = SIZE_RE.match(text.strip())
@@ -184,7 +200,13 @@ def parse_date(text: str, today: date | None = None) -> datetime | None:
 
 # ---------------- Parser ----------------
 
-def _my_courses_panel(soup: BeautifulSoup) -> Tag | None:
+def my_courses_panel(soup: BeautifulSoup) -> Tag | None:
+    """Panel "Meine Kurse und Gruppen". Zuerst über die Aktionen des Blocks (unabhängig von
+    Sprache und Überschrift), dann über die Überschrift auf Deutsch oder Englisch."""
+    for el in [*soup.find_all(attrs={"data-action": MEMBERSHIP_BLOCK_RE}),
+               *soup.find_all("a", href=MEMBERSHIP_BLOCK_RE)]:
+        if (panel := el.find_parent(class_="panel")) is not None:
+            return panel
     for h2 in soup.find_all("h2"):
         if h2.get_text(strip=True).lower() in MY_COURSES_HEADINGS:
             return h2.find_parent(class_="panel")
@@ -192,29 +214,33 @@ def _my_courses_panel(soup: BeautifulSoup) -> Tag | None:
 
 
 def parse_dashboard(html: str, semester_pattern: str = DEFAULT_SEMESTER_PATTERN) -> list[Course]:
-    """Kurse und Gruppen aus "Meine Kurse und Gruppen" lesen."""
+    """Kurse und Gruppen aus "Meine Kurse und Gruppen" lesen, je ref_id einmal."""
     soup = BeautifulSoup(html, "html.parser")
-    panel = _my_courses_panel(soup)
+    panel = my_courses_panel(soup)
     if panel is None:
         log.warning("Dashboard: Bereich 'Meine Kurse und Gruppen' nicht gefunden")
         return []
+    return parse_course_panel(panel, semester_pattern)
 
+
+def parse_course_panel(panel: Tag, semester_pattern: str = DEFAULT_SEMESTER_PATTERN) -> list[Course]:
     courses = []
-    for item in panel.select(".il-std-item"):
-        link = item.select_one(".il-item-title a[href]")
-        if link is None:
-            continue
+    seen: set[int] = set()
+    for link in panel.select(COURSE_TITLE_SELECTOR):
         target = parse_goto(link["href"])
-        if target is None or target[0] not in ("crs", "grp"):
+        if target is None or target[0] not in ("crs", "grp") or target[1] in seen:
             continue
-        group = item.find_parent(class_="il-item-group")
-        heading = group.find("h3") if group else None
         name = link.get_text(" ", strip=True)
+        if not name:
+            continue
+        seen.add(target[1])
+        group = link.find_parent(class_="il-item-group")
+        heading = group.find("h3") if group else None
         courses.append(Course(
             type=target[0],
             ref_id=target[1],
             name=name,
-            url=link["href"],
+            url=permalink(*target),
             semester=semester_from_name(name, semester_pattern),
             group_heading=heading.get_text(strip=True) if heading else None,
         ))
@@ -317,6 +343,11 @@ class CrawlCancelled(Exception):
     """Lauf über das cancel Token abgebrochen."""
 
 
+class CourseListNotFound(Exception):
+    """Weder auf dem Dashboard noch auf der Seite "Meine Kurse und Gruppen" eine Kursliste.
+    Lieber abbrechen als mit 0 Kursen still "nichts zu tun" melden."""
+
+
 @dataclass
 class CrawlResult:
     courses: list[Course]
@@ -366,7 +397,9 @@ class Crawler:
         if self.cancel.is_set():
             raise CrawlCancelled()
         self.throttle.wait()
-        r = self.session.get(url, timeout=TIMEOUT)
+        # Requests auf einer Session nacheinander, die Threads parsen nur parallel
+        with session_lock(self.session):
+            r = self.session.get(url, timeout=TIMEOUT)
         with self._lock:
             self.pages_fetched += 1
             count = self.pages_fetched
@@ -376,11 +409,14 @@ class Crawler:
         return r
 
     def _get(self, url: str) -> str:
+        return self._get_response(url).text
+
+    def _get_response(self, url: str) -> requests.Response:
         """Seite holen und sicherstellen, dass sie eingeloggt abgerufen wurde."""
         generation = self._session_generation
         r = self._fetch(url)
         if is_logged_in(r):
-            return r.text
+            return r
 
         log.info("Session abgelaufen (Antwort von %s), neuer Login", safe_url(r.url))
         if self.relogin is None:
@@ -396,10 +432,36 @@ class Crawler:
         r = self._fetch(url)
         if not is_logged_in(r):
             raise SessionExpired("ILIAS Session abgelaufen, auch nach neuem Login keine Anmeldung.")
-        return r.text
+        return r
 
     def fetch_courses(self) -> list[Course]:
-        return parse_dashboard(self._get(DASHBOARD), self.semester_pattern)
+        """Kursliste vom Dashboard, falls der Block dort fehlt von der Seite "Meine Kurse und Gruppen"."""
+        for page in (DASHBOARD, MEMBERSHIP_OVERVIEW):
+            try:
+                r = self._get_response(page)
+            except requests.HTTPError as e:
+                if page == DASHBOARD:
+                    raise
+                # Rückfall Seite gibt es in dieser ILIAS Version nicht
+                debug.log.warning("Rückfall %s nicht abrufbar: %s", debug.url(page), e.response.status_code
+                                  if e.response is not None else type(e).__name__)
+                continue
+            debug.log.info("Kursliste: abgerufen %s, gelandet auf %s", debug.url(page), debug.url(r.url))
+            panel = my_courses_panel(BeautifulSoup(r.text, "html.parser"))
+            if panel is None:
+                log.warning("Kursliste nicht gefunden auf %s", safe_url(r.url))
+                debug.log.warning("Kein Bereich 'Meine Kurse und Gruppen' auf %s", debug.url(r.url))
+                continue
+            debug.html("Kursliste", str(panel))
+            courses = parse_course_panel(panel, self.semester_pattern)
+            log.info("%d Kurse und Gruppen gefunden", len(courses))
+            debug.log.info("%d Kurse und Gruppen gefunden:", len(courses))
+            for c in courses:
+                debug.log.info("  ref_id %s [%s] %s (Semester: %s, Überschrift: %s)",
+                               c.ref_id, c.type, c.name, c.semester, c.group_heading)
+            return courses
+        raise CourseListNotFound("Die Liste 'Meine Kurse und Gruppen' wurde in ILIAS nicht gefunden. "
+                                 "Bitte später erneut versuchen, sonst den Debug Modus einschalten.")
 
     def list_container(self, url: str) -> list[IliasObject]:
         return parse_container(self._get(url), url)
@@ -422,8 +484,16 @@ class Crawler:
                 continue
             owner[course.ref_id] = course.name
             objs: list[IliasObject] = []
+            failed_before = len(result.failed)
             self._assemble(course.ref_id, [course.name], children, failed, owner, objs, result.failed)
             result.objects[course.ref_id] = objs
+            course_failed = result.failed[failed_before:]
+            debug.log.info("Kurs %s (%s): %s, %d Objekte, davon %d Dateien%s", course.ref_id, course.name,
+                           "FEHLER" if course.ref_id in failed else "ok", len(objs),
+                           sum(o.type == "file" for o in objs),
+                           f", nicht lesbar: {course_failed}" if course_failed else "")
+        for ref_id, outer in result.nested_in.items():
+            debug.log.info("Kurs %s: enthalten in %s", ref_id, outer)
         return result
 
     def _fetch_all(self, courses: list[Course]) -> tuple[dict[int, list[IliasObject]], set[int]]:
@@ -447,8 +517,13 @@ class Crawler:
                         ref_id = pending.pop(future)
                         try:
                             objs = future.result()
-                        except requests.RequestException as e:
+                        except (SessionExpired, CrawlCancelled):
+                            raise
+                        except Exception as e:
+                            # Ein kaputter Kurs oder Ordner hält die anderen nicht auf
                             log.warning("Seite nicht lesbar (ref_id %s): %s", ref_id, type(e).__name__)
+                            debug.log.error("Seite nicht lesbar (ref_id %s):\n%s", ref_id,
+                                            "".join(traceback.format_exception(e)))
                             failed.add(ref_id)
                             continue
                         children[ref_id] = objs

@@ -24,7 +24,7 @@ from pathlib import Path
 import keyring.errors
 import requests
 
-from . import __version__, auth, config, crawler, mapper, platform_utils, state, sync, updater
+from . import __version__, auth, config, crawler, debug, mapper, platform_utils, state, sync, updater
 from .api import (
     BaseDirCheck, Cancelled, ChangedFile, Config, ConfigError, DownloadedFile, IliasCourse, IliasSyncError,
     InvalidCredentialsError, LoginError, MappingSuggestion, NetworkError, PlannedAction, Progress,
@@ -51,6 +51,8 @@ def translate_errors() -> Iterator[None]:
         raise LoginError(str(e)) from None
     except crawler.CrawlCancelled:
         raise Cancelled("Abgebrochen.") from None
+    except crawler.CourseListNotFound as e:
+        raise IliasSyncError(str(e)) from None
     except sync.NotAvailable as e:
         raise IliasSyncError(str(e)) from None
     except requests.RequestException as e:
@@ -114,6 +116,11 @@ class Api:
 
     def _state(self, root: Path) -> state.State:
         return state.State(state.db_file(self._data_dir or config.data_dir(), root))
+
+    def _debug_paths(self, root: Path | None) -> None:
+        data = self._data_dir or config.data_dir()
+        debug.describe_paths(self._config_path or config.config_file(), data, self._cookie_path or auth.cookie_file(),
+                             root, state.db_file(data, root) if root is not None else None)
 
     def _stored_credentials(self) -> auth.Credentials:
         """Zugangsdaten für einen Login im Hintergrund: Uni-ID aus der Config, Passwort aus dem Schlüsselbund."""
@@ -327,7 +334,7 @@ class Api:
             if save_suggestions:
                 config.save_config(cfg, self._config_path)
         mapping = mapper.Mapper(cfg, root).map_crawl(result)
-        problems: list[str] = []
+        problems: list[str] = list(mapping.errors)
         jobs = sync.plan(mapping, st, root, cfg, problems)
         for p in problems:
             log.warning("Nicht ablegbar: %s", p)
@@ -336,6 +343,7 @@ class Api:
     def dry_run(self, progress: ProgressCallback, cancel: threading.Event) -> list[PlannedAction]:
         cfg = self._cfg()
         root = self._require_root(cfg)
+        self._debug_paths(root)
         with translate_errors(), self._state(root) as st:
             _, mapping, jobs, _ = self._prepare(cfg, st, root, progress, cancel, save_suggestions=False)
             return sync.planned_actions(jobs, mapping, root)
@@ -361,6 +369,7 @@ class Api:
     def _sync(self, progress: ProgressCallback, cancel: threading.Event) -> SyncResult:
         cfg = self._cfg()
         root = self._require_root(cfg)
+        self._debug_paths(root)
         with translate_errors(), self._state(root) as st:
             if problem := sync.check_first_sync(st, root):
                 raise ConfigError(problem)
@@ -388,6 +397,42 @@ class Api:
         root = self._require_root(self._cfg())
         with self._state(root) as st:
             st.dismiss_changed(ref_id)
+
+    # ---------------- Zurücksetzen ----------------
+
+    def reset_local_state(self, forget_password: bool = False) -> Path | None:
+        """Gespeicherten Zustand zurücksetzen wie bei einer frischen Installation. Eine
+        Neuinstallation der App tut das nicht, Config und Index liegen außerhalb des App Ordners.
+
+        Gelöscht werden die Index Datenbanken aller Uni Ordner und die Cookies, auf Wunsch
+        auch das Passwort im Schlüsselbund. Die Config wird nicht gelöscht, sondern als
+        config_backup_<Zeit>.toml daneben gesichert, danach startet der Einrichtungsassistent.
+        Heruntergeladene Dateien im Uni Ordner bleiben unberührt. Liefert den Pfad der
+        Sicherung oder None, wenn es keine Config gab."""
+        config_path = self._config_path or config.config_file()
+        data = self._data_dir or config.data_dir()
+        user = self.stored_username()
+        backup = None
+        try:
+            if config_path.exists():
+                backup = config_path.with_name(f"config_backup_{datetime.now():%Y-%m-%d_%H%M%S}.toml")
+                os.replace(config_path, backup)
+            # Nur eigene Index Dateien, samt SQLite Nebendateien
+            for pattern in ("index_*.sqlite3", "index_*.sqlite3-journal", "index_*.sqlite3-wal",
+                            "index_*.sqlite3-shm"):
+                for f in data.glob(pattern):
+                    f.unlink(missing_ok=True)
+            auth.clear_cookies(self._cookie_path)
+        except OSError as e:
+            raise IliasSyncError(f"Zurücksetzen fehlgeschlagen: {e.strerror or type(e).__name__}") from None
+        if forget_password and user:
+            with translate_errors():
+                auth.forget_password(user)
+        with self._session_lock:
+            self._session = None
+        log.info("Lokaler Zustand zurückgesetzt (Index, Cookies%s), Config gesichert: %s",
+                 ", Passwort" if forget_password else "", backup)
+        return backup
 
     # ---------------- Status ----------------
 

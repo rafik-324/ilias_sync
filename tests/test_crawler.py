@@ -32,7 +32,7 @@ def test_dashboard_courses():
         type="crs",
         ref_id=1746845,
         name="Marketing [V] (HWS 2026)",
-        url="https://ilias.uni-mannheim.de/goto.php/crs/1746845",
+        url="https://ilias.uni-mannheim.de/goto.php?target=crs_1746845",   # Permalink aus der ref_id
         semester="HWS 2026",
         group_heading="HWS 2026",
     )
@@ -52,6 +52,78 @@ def test_dashboard_groups_and_semester():
 
 def test_dashboard_without_panel_returns_empty():
     assert crawler.parse_dashboard("<html><h2>Neuigkeiten</h2></html>") == []
+
+
+def test_dashboard_panel_found_without_heading_text():
+    """Andere Oberflächensprache: das Panel wird an den Block Aktionen erkannt, nicht am Text."""
+    html = fixture("dashboard.html").replace("Meine Kurse und Gruppen", "Mes cours et groupes")
+    assert len(crawler.parse_dashboard(html)) == 11
+
+
+def test_dashboard_tile_view_and_duplicates():
+    html = """<div class="panel"><h2>Meine Kurse und Gruppen</h2>
+      <div class="il-item-group"><h3>HWS 2026</h3><div class="il-deck">
+        <div class="il-card thumbnail"><a href="goto.php/crs/7"><img alt=""></a>
+          <div class="caption card-title"><a href="goto.php/crs/7">Marketing [V] (HWS 2026)</a></div></div>
+        <div class="il-card thumbnail">
+          <div class="caption card-title"><a href="goto.php?target=grp_8">Tutorium</a></div></div>
+        <div class="il-card thumbnail">
+          <div class="caption card-title"><a href="goto.php/crs/7">Marketing [V] (HWS 2026)</a></div></div>
+      </div></div></div>"""
+    courses = crawler.parse_dashboard(html)
+    assert [(c.type, c.ref_id, c.url, c.group_heading) for c in courses] == [
+        ("crs", 7, crawler.permalink("crs", 7), "HWS 2026"),
+        ("grp", 8, crawler.permalink("grp", 8), "HWS 2026"),
+    ]
+
+
+class PageSession:
+    """Antwortet je URL mit einer festen Seite, zählt gleichzeitige Abrufe."""
+
+    def __init__(self, pages: dict[str, tuple[int, str]], delay: float = 0.0):
+        self.pages = pages
+        self.delay = delay
+        self.active = 0
+        self.max_active = 0
+        self.lock = threading.Lock()
+
+    def get(self, url, timeout):
+        with self.lock:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+        time.sleep(self.delay)
+        with self.lock:
+            self.active -= 1
+        status, html = self.pages.get(url, (200, LOGGED_IN))
+        r = response(url, html)
+        r.status_code = status
+        return r
+
+
+def test_fetch_courses_falls_back_to_membership_overview():
+    panel = fixture("dashboard.html")
+    s = PageSession({
+        crawler.DASHBOARD: (200, LOGGED_IN),
+        crawler.MEMBERSHIP_OVERVIEW: (200, panel + LOGGED_IN),
+    })
+    assert len(Crawler(s, delay=0).fetch_courses()) == 11
+
+
+def test_fetch_courses_without_any_list_is_an_error():
+    s = PageSession({crawler.DASHBOARD: (200, LOGGED_IN), crawler.MEMBERSHIP_OVERVIEW: (404, LOGGED_IN)})
+    with pytest.raises(crawler.CourseListNotFound):
+        Crawler(s, delay=0).fetch_courses()
+
+
+def test_requests_on_one_session_run_one_after_another():
+    s = PageSession({}, delay=0.02)
+    c = Crawler(s, delay=0, max_parallel=5)
+    threads = [threading.Thread(target=c._get, args=(f"{crawler.ILIAS}/x{i}",)) for i in range(5)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert s.max_active == 1
 
 
 # ---------------- Container ----------------
@@ -256,6 +328,19 @@ def test_crawl_records_unreadable_pages_instead_of_treating_them_as_empty():
     result = FakeCrawler(pages, fail={"f2"}).crawl([course(1, "Kurs", "k")])
     assert result.failed == ["Kurs / Kaputt"]
     assert [o.name for o in result.objects[1]] == ["Kaputt", "Gut", "a.pdf"]
+
+
+def test_unexpected_error_in_one_course_does_not_stop_others():
+    class Broken(FakeCrawler):
+        def list_container(self, url):
+            if url == "k1":
+                raise AttributeError("Parser kaputt")
+            return super().list_container(url)
+
+    pages = {"k2": [IliasObject("file", 5, "a.pdf", "d5")]}
+    result = Broken(pages).crawl([course(1, "Kaputt", "k1"), course(2, "Gut", "k2")])
+    assert result.failed == ["Kaputt"]
+    assert [o.name for o in result.objects[2]] == ["a.pdf"]
 
 
 def test_crawl_is_parallel():

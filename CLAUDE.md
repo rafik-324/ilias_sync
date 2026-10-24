@@ -44,7 +44,8 @@ Rechner spezifische Angaben (Pfade, Worktrees, Python Umgebungen, Verlauf) stehe
 ilias_sync/
   __main__.py          Einstieg: GUI starten oder CLI Modus (--login, --logout, --crawl
                        mit --course/--output/-v, --test-sync ZIELORDNER [--videos],
-                       --dry-run und --sync [--output])
+                       --dry-run und --sync [--output], --reset-state [--yes] [--forget-password],
+                       --debug für alle Modi)
   auth.py              Login, Session, Cookies, Keyring (Basis: ilias_login.py)
   crawler.py           ILIAS Kurse und Objekte rekursiv erfassen
   objects/             Handler pro ILIAS Objekttyp
@@ -60,6 +61,7 @@ ilias_sync/
   state.py             SQLite Index, eine Datenbank pro Uni Ordner
   config.py            Laden, Validieren, Standardwerte
   scheduler.py         Intervall Sync im Hintergrund (Logik ohne Qt)
+  debug.py             Debug Modus (--debug bzw. ILIAS_SYNC_DEBUG=1): eigenes Log ilias-sync-debug.log
   api.py               Fassade für die GUI: einzige Schnittstelle zwischen GUI und Backend (Vertrag, Datentypen)
   backend.py           Umsetzung von api.Api, geladen über `from ilias_sync.api import Api`
   gui/
@@ -122,7 +124,9 @@ Anforderungen:
 * Semester aus dem Kursnamen ableiten, Muster z. B. `(HWS 2026)` oder `(FSS 2027)`, per Regex in Config anpassbar
 * Rekursiv durch Ordner, Sitzungen, Gruppen und Lernmodule mit Container Charakter
 * Pro Objekt erfassen: Typ, ref_id, Name, ILIAS Pfad, Änderungsdatum, Größe, Download URL
-* Parallelität standardmäßig 3, maximal 5, kleine Pause zwischen Seitenabrufen
+* Parallelität standardmäßig 3, maximal 5, kleine Pause zwischen Seitenabrufen. Die HTTP Requests auf einer Session laufen trotzdem nacheinander (`auth.session_lock`), parallel ist nur das Parsen
+* Kursliste über stabile Merkmale (Aktionen von `ilMembershipBlockGUI`, Titel Links in Listen und Kachelansicht), Überschrift nur als Rückfall. Fehlt der Block auf dem Dashboard, wird `ilMembershipOverviewGUI` versucht, sonst Fehler `CourseListNotFound` statt still 0 Kurse. Kurse werden über den Permalink `goto.php?target=<typ>_<ref_id>` aufgerufen
+* Fehler bei einem Kurs, Ordner oder einer Datei (auch unerwartete) brechen nur dieses Objekt ab, nie den ganzen Lauf
 * Unbekannte Objekttypen loggen und überspringen, nicht abbrechen
 
 ## Was heruntergeladen wird
@@ -304,6 +308,8 @@ Config liegt im Config Verzeichnis von `platformdirs`, wird beim Start validiert
 * Zielname schon belegt, Datei aber nicht im Index: vorhandene Datei bleibt, die ILIAS Datei kommt als `<name>_ilias_<YYYY-MM-DD>.<ext>` daneben. **Kein Inhaltsvergleich**, das Tool bleibt schmal (Entscheidung des Nutzers 2026-09-26). Das Tool benennt nie etwas um, eigene umbenannte Dateien tauscht der Nutzer selbst aus
 * Lokale Datei vom Nutzer verändert: nie anfassen
 * Datei vom Nutzer verschoben oder gelöscht (laut Index schon geladen): **nicht erneut laden**. In der GUI gibt es "Erneut herunterladen" pro Datei
+* **Ausnahme (2026-10-24)**: Liegt von einem Kurs **keine einzige** laut Index geladene Datei mehr lokal, gilt der Index dieses Kurses als veraltet (Kurs oder Uni Ordner weg, z. B. nach Neuinstallation, der Index im Datenverzeichnis bleibt dabei erhalten). Dann wird der Kurs neu geladen (`sync.stale_courses`). Einen Kurs bewusst nicht haben: Schalter `download_*` des Kurses
+* Zurücksetzen (`Api.reset_local_state`, CLI `--reset-state`): löscht Index und Cookies, sichert die Config als `config_backup_<Zeit>.toml`, optional Passwort. Dateien bleiben
 * Ordner aus `[ignore]` werden nie betreten oder beschrieben
 * Dry Run Modus: zeigt geplante Aktionen, schreibt nichts
 

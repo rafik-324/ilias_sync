@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from dataclasses import dataclass
 from http.cookiejar import LWPCookieJar
 from pathlib import Path
@@ -29,7 +30,7 @@ import requests
 from bs4 import BeautifulSoup
 from keyring.errors import PasswordDeleteError
 
-from . import __version__
+from . import __version__, debug
 from .config import APP_NAME, data_dir
 
 ILIAS = "https://ilias.uni-mannheim.de"
@@ -81,6 +82,24 @@ def safe_url(url: str) -> str:
 
 
 # ---------------- Session und Cookies ----------------
+
+_lock_guard = threading.Lock()
+
+
+def session_lock(s: requests.Session) -> threading.RLock:
+    """Eine Sperre pro Session. Alle Requests auf derselben Session laufen damit nacheinander:
+    requests.Session ist nicht thread sicher, und ILIAS merkt sich in der Session serverseitig
+    Navigationszustand, den parallele Abrufe gegenseitig überschreiben könnten. RLock, weil ein
+    Download mitten im Abruf neu einloggen kann."""
+    lock = getattr(s, "_ilias_sync_lock", None)
+    if lock is None:
+        with _lock_guard:
+            lock = getattr(s, "_ilias_sync_lock", None)
+            if lock is None:
+                lock = threading.RLock()
+                s._ilias_sync_lock = lock
+    return lock
+
 
 def make_session(path: Path | None = None) -> requests.Session:
     path = path or cookie_file()
@@ -151,9 +170,12 @@ def is_logged_in(resp: requests.Response) -> bool:
 
 
 def check_session(s: requests.Session) -> bool:
-    r = s.get(DASHBOARD, timeout=TIMEOUT)
+    with session_lock(s):
+        r = s.get(DASHBOARD, timeout=TIMEOUT)
     _require_https(r)
-    return is_logged_in(r)
+    ok = is_logged_in(r)
+    debug.log.info("Session Prüfung: %s, Seite %s", "eingeloggt" if ok else "nicht eingeloggt", debug.url(r.url))
+    return ok
 
 
 # ---------------- Formular Parsing ----------------
@@ -214,6 +236,11 @@ def parse_form(html: str, base_url: str) -> Form | None:
 
 def login(s: requests.Session, user: str, password: str) -> requests.Response:
     """SAML Login durchlaufen. Wirft InvalidCredentials oder LoginError."""
+    with session_lock(s):
+        return _login(s, user, password)
+
+
+def _login(s: requests.Session, user: str, password: str) -> requests.Response:
     log.info("Login gestartet")
     r = s.get(SAML_START, timeout=TIMEOUT)
     credentials_sent = False
@@ -223,6 +250,7 @@ def login(s: requests.Session, user: str, password: str) -> requests.Response:
         on_ilias = urlparse(r.url).hostname == ILIAS_HOST
         if on_ilias and is_logged_in(r):
             log.info("Login erfolgreich")
+            debug.log.info("Login erfolgreich, finale URL: %s", debug.url(r.url))
             return r
 
         f = parse_form(r.text, r.url)
@@ -254,8 +282,11 @@ def login(s: requests.Session, user: str, password: str) -> requests.Response:
             r = s.get(f.action, params=f.data, timeout=TIMEOUT)
 
     if check_session(s):
+        # Login hat geklappt, die letzte Seite war aber kein ILIAS Dashboard (z. B. Zwischenseite)
         log.info("Login erfolgreich")
+        debug.log.info("Login erfolgreich über Session Prüfung, letzte Seite des Logins: %s", debug.url(r.url))
         return r
+    debug.log.warning("Login fehlgeschlagen, letzte Seite: %s", debug.url(r.url))
     raise LoginError(f"Login fehlgeschlagen, zuletzt auf: {safe_url(r.url)}")
 
 

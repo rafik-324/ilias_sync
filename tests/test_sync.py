@@ -87,27 +87,99 @@ def test_new_file_is_downloaded_and_indexed(env):
     assert jobs == [] and session.calls == ["u1"]
 
 
+# Zweite Datei im selben Kurs, die liegen bleibt: so ist der Kursordner noch da und
+# eine fehlende Datei gilt als vom Nutzer entfernt (nicht als veralteter Index)
+KEEP = {"u2": b"bleibt"}
+
+
+def keep() -> MappedItem:
+    return mapped(2, "folien.pdf")
+
+
 def test_removed_by_user_is_never_downloaded_again(env):
     root, st = env
-    session = FakeSession({"u1": b"v1"})
-    run(mapping(mapped(1)), st, root, session)
+    session = FakeSession({"u1": b"v1", **KEEP})
+    run(mapping(mapped(1), keep()), st, root, session)
     target(root).unlink()
 
-    jobs, _ = run(mapping(mapped(1)), st, root, session)
+    jobs, _ = run(mapping(mapped(1), keep()), st, root, session)
     assert [(j.kind, j.mark_removed) for j in jobs] == [(ActionKind.SKIP_REMOVED, True)]
     assert st.get(1).status == ItemStatus.USER_REMOVED
-    jobs, _ = run(mapping(mapped(1, size=99)), st, root, session)   # auch nicht, wenn ILIAS sie ändert
+    jobs, _ = run(mapping(mapped(1, size=99), keep()), st, root, session)   # auch nicht, wenn ILIAS sie ändert
     assert [(j.kind, j.mark_removed) for j in jobs] == [(ActionKind.SKIP_REMOVED, False)]
-    assert not target(root).exists() and session.calls == ["u1"]
+    assert not target(root).exists() and sorted(session.calls) == ["u1", "u2"]
     assert [i.ref_id for i in st.removed()] == [1]
 
 
 def test_moved_by_user_counts_as_removed(env):
     root, st = env
-    run(mapping(mapped(1)), st, root, FakeSession({"u1": b"v1"}))
+    run(mapping(mapped(1), keep()), st, root, FakeSession({"u1": b"v1", **KEEP}))
     target(root).rename(root / "woanders.pdf")
-    jobs, _ = run(mapping(mapped(1)), st, root, FakeSession({}))
+    jobs, _ = run(mapping(mapped(1), keep()), st, root, FakeSession({}))
     assert jobs[0].kind == ActionKind.SKIP_REMOVED
+
+
+def test_course_without_any_local_file_is_loaded_again(env):
+    """Lage nach einer Neuinstallation: Index im Datenverzeichnis blieb, der Uni Ordner ist neu
+    und leer. Dann ist der Index veraltet, nicht der Nutzer hat alles gelöscht."""
+    root, st = env
+    files = {"u1": b"v1", **KEEP}
+    run(mapping(mapped(1), keep()), st, root, FakeSession(files))
+    for name in ("skript.pdf", "folien.pdf"):
+        target(root, name).unlink()
+
+    session = FakeSession(files)
+    jobs, result = run(mapping(mapped(1), keep()), st, root, session)
+    assert [j.kind for j in jobs] == [ActionKind.NEW, ActionKind.NEW]
+    assert target(root).read_bytes() == b"v1" and target(root, "folien.pdf").exists()
+    assert {st.get(1).status, st.get(2).status} == {ItemStatus.OK}
+    assert result.run.new == 2
+
+
+def test_stale_index_with_removed_marks_is_loaded_again(env):
+    """Auch wenn ein früherer Lauf schon alles als user_removed markiert hat (Stand beim Kollegen)."""
+    root, st = env
+    files = {"u1": b"v1", **KEEP}
+    run(mapping(mapped(1), keep()), st, root, FakeSession(files))
+    st.set_status(1, ItemStatus.USER_REMOVED)
+    st.set_status(2, ItemStatus.USER_REMOVED)
+    for name in ("skript.pdf", "folien.pdf"):
+        target(root, name).unlink()
+
+    jobs, _ = run(mapping(mapped(1), keep()), st, root, FakeSession(files))
+    assert [j.kind for j in jobs] == [ActionKind.NEW, ActionKind.NEW]
+    assert st.removed() == []
+
+
+def test_stale_course_does_not_affect_other_courses(env):
+    root, st = env
+    other = Course("crs", 101, "Formale Grundlagen (HWS 2026)", "u101", "HWS 2026", "HWS 2026")
+    obj = IliasObject("file", 5, "blatt.pdf", "u5", path=[other.name], size=1)
+    rel = ("01_SEMESTER", "02_formale", "blatt.pdf")
+    item = MappedItem(obj, other, rel, None, False, set())
+    files = {"u1": b"v1", **KEEP, "u5": b"b"}
+    run(mapping(mapped(1), keep(), item), st, root, FakeSession(files))
+    target(root).unlink()                      # Marketing: Kursordner bleibt, eine Datei fehlt
+    (root / "01_SEMESTER" / "02_formale" / "blatt.pdf").unlink()   # Formale: ganzer Kurs leer
+
+    jobs, _ = run(mapping(mapped(1), keep(), item), st, root, FakeSession(files))
+    assert sorted((j.item.obj.ref_id, j.kind) for j in jobs) == [(1, ActionKind.SKIP_REMOVED), (5, ActionKind.NEW)]
+
+
+def test_unexpected_error_in_one_download_does_not_stop_others(env, monkeypatch):
+    root, st = env
+    real = sync.downloader.download_file
+
+    def flaky(session, url, target, *args):
+        if url == "u1":
+            raise RuntimeError("kaputt")
+        return real(session, url, target, *args)
+
+    monkeypatch.setattr(sync.downloader, "download_file", flaky)
+    jobs, result = run(mapping(mapped(1), keep()), st, root, FakeSession({"u1": b"v1", **KEEP}))
+    assert target(root, "folien.pdf").read_bytes() == b"bleibt"
+    assert result.run.new == 1 and result.run.errors == 1
+    assert st.get(1).status == ItemStatus.ERROR and st.get(2).status == ItemStatus.OK
 
 
 def test_changed_in_ilias_is_only_reported(env):
@@ -188,9 +260,9 @@ def test_dismissed_change_stays_quiet(env):
 
 def test_redownload_removed_file(env):
     root, st = env
-    run(mapping(mapped(1)), st, root, FakeSession({"u1": b"v1"}))
+    run(mapping(mapped(1), keep()), st, root, FakeSession({"u1": b"v1", **KEEP}))
     target(root).unlink()
-    run(mapping(mapped(1)), st, root, FakeSession({}))
+    run(mapping(mapped(1), keep()), st, root, FakeSession({}))
     assert st.get(1).status == ItemStatus.USER_REMOVED
     sync.redownload(FakeSession({"u1": b"v1"}), st, root, 1)
     assert target(root).read_bytes() == b"v1"

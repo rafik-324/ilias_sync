@@ -23,12 +23,14 @@ import fnmatch
 import logging
 import os
 import re
+import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import debug
 from .api import Config, CourseConfig
 from .crawler import Course, CrawlResult, IliasObject
-from .platform_utils import linux_name, nfc, short_dir_name
+from .platform_utils import linux_name, nfc, sanitize_name, short_dir_name
 
 log = logging.getLogger(__name__)
 
@@ -109,6 +111,14 @@ def loose_folder_key(name: str) -> frozenset[str]:
 def number_prefix(name: str) -> int | None:
     m = re.match(r"^(\d{1,3})_", name)
     return int(m.group(1)) if m else None
+
+
+def safe_local_dir(value: str) -> str:
+    """Kursordner aus der Config (vom Nutzer in der GUI änderbar) für das Dateisystem absichern:
+    nur relative Teile, kein "..", keine unter Windows verbotenen Zeichen. "a/b" bleibt erlaubt
+    (_neue_kurse/<kurs>), Groß/Kleinschreibung und Umlaute bleiben, wie der Nutzer sie gewählt hat."""
+    parts = [sanitize_name(p) for p in re.split(r"[/\\]+", value) if p.strip() not in ("", ".", "..")]
+    return "/".join(parts) or "kurs"
 
 
 def is_video_name(name: str) -> bool:
@@ -313,6 +323,9 @@ class MappingResult:
     items: list[MappedItem]
     courses: list[CourseMapping]
     semesters: dict[str, str]
+    # Kurse bzw. Dateien, die nicht zugeordnet werden konnten, als anzeigbarer Text.
+    # Sie fehlen in items, alle anderen Kurse werden normal verarbeitet
+    errors: list[str] = field(default_factory=list)
 
 
 # ---------------- Mapper ----------------
@@ -411,14 +424,15 @@ class Mapper:
             top = self.resolve_folder((), NO_SEMESTER_DIR)
             configured = self.config_courses.get(course.ref_id)
             if configured and configured.local_dir:
-                return CourseMapping(course, None, top, configured.local_dir,
-                                     self._exists((top,), configured.local_dir), "ohne Semester")
+                local_dir = safe_local_dir(configured.local_dir)
+                return CourseMapping(course, None, top, local_dir, self._exists((top,), local_dir), "ohne Semester")
             return CourseMapping(course, None, top, self.resolve_folder((top,), course.name), False, "ohne Semester")
         semester_dir = semester_dirs[semester]
         configured = self.config_courses.get(course.ref_id)
         if configured and configured.local_dir:
-            exists = self._exists((semester_dir,), configured.local_dir)
-            return CourseMapping(course, semester, semester_dir, configured.local_dir, exists, "config")
+            local_dir = safe_local_dir(configured.local_dir)
+            exists = self._exists((semester_dir,), local_dir)
+            return CourseMapping(course, semester, semester_dir, local_dir, exists, "config")
         local_dirs = self.tree.subdirs((semester_dir,))
         match, _ = best_course_dir(course.name, [d for d in local_dirs if not d.startswith("_")],
                                    self.cfg.semester_pattern)
@@ -478,11 +492,17 @@ class Mapper:
 
         # 1. Alle Objekte mit ihren ILIAS Ordnern sammeln
         mappings: list[CourseMapping] = []
+        errors: list[str] = []
         work: list[tuple[IliasObject, Course, CourseMapping, tuple[str, ...], list[IliasObject]]] = []
         for course in result.courses:
             if course.ref_id in result.nested_in:
                 continue
-            cm = self.map_course(course, semester_dirs)
+            try:
+                cm = self.map_course(course, semester_dirs)
+            except Exception as e:
+                # Ein Kurs, der sich nicht zuordnen lässt, hält die anderen nicht auf
+                errors.append(self._failed(f"Kurs {course.name}", e))
+                continue
             mappings.append(cm)
             course_rel = (cm.semester_dir, *cm.course_dir.split("/"))
             stack: list[IliasObject] = []
@@ -511,9 +531,19 @@ class Mapper:
                 self.resolve_category(course_rel, category)
 
         # 3. Zielpfade
-        items = [self._map_object(obj, course, cm, course_rel, ancestors)
-                 for obj, course, cm, course_rel, ancestors in work]
-        return MappingResult(items=items, courses=mappings, semesters=semester_dirs)
+        items = []
+        for obj, course, cm, course_rel, ancestors in work:
+            try:
+                items.append(self._map_object(obj, course, cm, course_rel, ancestors))
+            except Exception as e:
+                errors.append(self._failed(f"{course.name} / {obj.name}", e))
+        return MappingResult(items=items, courses=mappings, semesters=semester_dirs, errors=errors)
+
+    @staticmethod
+    def _failed(what: str, e: Exception) -> str:
+        log.warning("Zuordnung fehlgeschlagen (%s): %s", what, type(e).__name__)
+        debug.log.error("Zuordnung fehlgeschlagen (%s):\n%s", what, "".join(traceback.format_exception(e)))
+        return f"{what}: konnte nicht zugeordnet werden, Details im Log"
 
     def _category_and_rest(self, course: Course, ancestors: list[IliasObject]) -> tuple[str | None, list[str]]:
         """Kategorie bestimmen und die verbleibenden ILIAS Ordner zurückgeben."""

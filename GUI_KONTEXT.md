@@ -228,6 +228,11 @@ class Api:
         # Netzwerk. Versucht bei Ablauf selbst neu einzuloggen, wenn Passwort im Keyring
     def logout(self) -> None: ...
         # Keyring Eintrag und Cookie Datei löschen
+    def reset_local_state(self, forget_password: bool = False) -> Path | None: ...
+        # Zustand wie nach frischer Installation: Index aller Uni Ordner und Cookies löschen,
+        # Config als config_backup_<Zeit>.toml sichern (danach config_exists() False, Wizard startet).
+        # Optional Passwort im Keyring löschen. Heruntergeladene Dateien bleiben. Liefert die
+        # Sicherung oder None. Wirft IliasSyncError. Vorher bestätigen lassen und nicht während eines Syncs
 
     # Config (schnell, Hauptthread erlaubt)
     def config_exists(self) -> bool: ...

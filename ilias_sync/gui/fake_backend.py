@@ -374,6 +374,21 @@ class FakeApi:
         self._has_password = False
         log.info("Abgemeldet, Passwort und Cookies entfernt")
 
+    def reset_local_state(self, forget_password: bool = False) -> Path | None:
+        """Wie Api.reset_local_state: Index, Cookies und Config weg, Dateien bleiben."""
+        with self._lock:
+            had_config = self._config is not None
+            self._config = None
+            self._runs.clear()
+            self._downloaded.clear()
+            self._removed.clear()
+            self._changed.clear()
+            self._logged_in = False
+            if forget_password:
+                self._has_password = False
+        log.info("Lokaler Zustand zurückgesetzt")
+        return self.workdir / "config_backup.toml" if had_config else None
+
     # ---------------- Config ----------------
 
     def config_exists(self) -> bool:

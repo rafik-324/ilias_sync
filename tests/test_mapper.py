@@ -565,3 +565,17 @@ def test_umbenannter_semesterordner_wird_wiedergefunden(tmp_path):
     assert m.semester_dirs(result) == {"HWS 2026": "01_SEMESTER"}
     [item] = m.map_crawl(result).items
     assert item.rel_path[0] == "01_SEMESTER"
+
+
+@pytest.mark.parametrize("value, expected", [
+    ("01_marketing", "01_marketing"),
+    ("02_Übung", "02_Übung"),
+    ("_neue_kurse/marketing", "_neue_kurse/marketing"),
+    ("../../etc", "etc"),
+    ("a\\b", "a/b"),
+    ("kurs: teil?", "kurs_ teil_"),
+    ("CON", "_CON"),
+    ("", "kurs"),
+])
+def test_safe_local_dir(value, expected):
+    assert mapper.safe_local_dir(value) == expected
