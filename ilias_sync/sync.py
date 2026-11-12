@@ -66,13 +66,15 @@ def ilias_path(item: MappedItem) -> str:
 
 
 def wanted(item: MappedItem, cfg: Config) -> bool:
-    """Nur Dateien, andere ILIAS Objekttypen werden nie geladen (Entscheidung des Nutzers).
-    Schalter pro Kurs beachten."""
+    """Nur Dateien, dazu die Dateien aus Übungen (Aufgabenstellung, Vorgaben, Musterlösung).
+    Andere ILIAS Objekttypen werden nie geladen (Entscheidung des Nutzers). Schalter pro Kurs beachten."""
     if item.obj.type != "file" or not item.obj.url:
         return False
     course = next((c for c in cfg.courses if c.ref_id == item.course.ref_id), None)
     if course is None:
         return True
+    if item.obj.exercise:
+        return course.download_exercises
     return course.download_videos if is_video(item) else course.download_files
 
 

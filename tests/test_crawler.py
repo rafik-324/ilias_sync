@@ -168,6 +168,31 @@ def test_course_page_from_page_editor():
     ]
 
 
+def test_items_in_blocks_with_negative_parent_id():
+    # Seit Oktober 2026: Einträge in Blöcken der Kursseite haben "_pref_-1" statt der Eltern ref_id.
+    # Früher wurden sie still verworfen, ganze Ordner fehlten
+    html = """<div id="il_center_col">
+      <li id="item_row_fold-1787941"><div class="ilContainerListItemOuter" data-list-item-id="lg_div_1787941_pref_-1">
+        <h3 class="il_ContainerItemTitle"><a class="il_ContainerItemTitle"
+          href="https://ilias.uni-mannheim.de/goto.php/fold/1787941">Tutorien</a></h3></div></li>
+      <li id="item_row_1803410-1802434"><div class="ilContainerListItemOuter" data-list-item-id="lg_div_1802434_pref_-2">
+        <img class="ilListItemIcon" alt="Ordner" src="./assets/images/standard/icon_fold.svg">
+        <h3 class="il_ContainerItemTitle"><a class="il_ContainerItemTitle"
+          href="https://ilias.uni-mannheim.de/goto.php/fold/1802434">Große Übung</a></h3></div></li>
+    </div>"""
+    assert [(o.type, o.ref_id, o.name) for o in crawler.parse_container(html)] == [
+        ("fold", 1787941, "Tutorien"),
+        ("fold", 1802434, "Große Übung"),
+    ]
+
+
+def test_unknown_list_item_id_is_logged(caplog):
+    html = """<div class="ilContainerListItemOuter" data-list-item-id="lg_div_x_pref_y">
+      <h3 class="il_ContainerItemTitle"><a class="il_ContainerItemTitle" href="goto.php/fold/1">A</a></h3></div>"""
+    assert crawler.parse_container(html) == []
+    assert "unbekannter Kennung" in caplog.text
+
+
 def _row(ref_id: int, href: str, icon: str = "", li_id: str = "item_row_123-1") -> str:
     return f"""
     <li id="{li_id}"><div class="ilContainerListItemOuter" data-list-item-id="lg_div_{ref_id}_pref_9">
@@ -466,3 +491,94 @@ def test_parallel_expiry_logs_in_only_once():
     for t in threads:
         t.join()
     assert calls == [1]
+
+
+# ---------------- Übungen ----------------
+
+EXC_BASE = "https://ilias.uni-mannheim.de/ilias.php"
+OVERVIEW_URL = ("ilias.php?baseClass=ilexercisehandlergui&cmdNode=cz:nw&cmdClass=ilObjExerciseGUI"
+                "&cmd=showOverview&ref_id=7&mode={mode}&from_overview=1")
+ASS_URL = ("ilias.php?baseClass=ilexercisehandlergui&cmdNode=cz:nw:5a&cmdClass=ilAssignmentPresentationGUI"
+           "&ref_id=7&mode=all&from_overview=1&ass_id={ass_id}")
+
+
+def _mode_buttons(engaged: str) -> str:
+    return "".join(
+        f'<button class="btn btn-default{" engaged" if mode == engaged else ""}" '
+        f'aria-pressed="{"true" if mode == engaged else "false"}" data-action="{OVERVIEW_URL.format(mode=mode)}">'
+        f"{label}</button>"
+        for mode, label in (("ongoing", "Laufende"), ("past", "Vergangene"), ("all", "Alle"))
+    )
+
+
+def test_exercise_all_mode_url():
+    url = crawler.exercise_all_mode_url(_mode_buttons("ongoing"), EXC_BASE)
+    assert url == "https://ilias.uni-mannheim.de/" + OVERVIEW_URL.format(mode="all")
+    assert crawler.exercise_all_mode_url(_mode_buttons("all"), EXC_BASE) is None
+    assert crawler.exercise_all_mode_url("<p>keine Knöpfe</p>", EXC_BASE) is None
+
+
+def _assignment_item(ass_id: int, title: str) -> str:
+    href = ASS_URL.format(ass_id=ass_id)
+    return f"""<li class="il-std-item-container"><div class="il-item il-std-item">
+      <h4 class="il-item-title"><a href="{href}">{title}</a></h4>
+      <ul class="dropdown-menu"><li><a href="{href}">Arbeitsanweisung anzeigen</a></li>
+      <li><a href="ilias.php?cmdClass=ilExSubmissionFileGUI&cmd=submissionScreen&ass_id={ass_id}">
+        Bereits abgegebene Dateien</a></li></ul></div></li>"""
+
+
+def test_parse_exercise_overview():
+    html = f'<div id="il_center_col">{_mode_buttons("all")}<ul>' \
+           f'{_assignment_item(26131, "P09")}{_assignment_item(26122, "P01")}{_assignment_item(26122, "P01")}</ul></div>'
+    objs = crawler.parse_exercise_overview(html, EXC_BASE)
+    assert [(o.type, o.ref_id, o.name) for o in objs] == [
+        (crawler.ASSIGNMENT, -26131, "P09"),
+        (crawler.ASSIGNMENT, -26122, "P01"),
+    ]
+    assert objs[0].is_container
+    assert objs[0].url == "https://ilias.uni-mannheim.de/" + ASS_URL.format(ass_id=26131)
+
+
+def _download_row(label: str, cmd: str, extra: str = "") -> str:
+    href = (f"ilias.php?baseClass=ilexercisehandlergui&cmdNode=cz:nw:5a:cp&cmdClass=ilexsubmissiongui"
+            f"&cmd={cmd}&ref_id=7&ass_id=26122&mode=all{extra}")
+    return f"""<div class="row"><div class="control-label col-sm-4"><p>{label}</p></div>
+      <div class="col-sm-8"><p><a href="{href}">Download</a></p></div></div>"""
+
+
+def test_parse_assignment_files_and_solution_but_not_own_submissions():
+    html = f"""<div id="il_center_col">
+      {_download_row("P1.pdf", "downloadFile", "&file=P1.pdf")}
+      {_download_row("vorgaben-P1.zip", "downloadFile", "&file=vorgaben-P1.zip")}
+      <a href="ilias.php?cmdClass=ilExSubmissionFileGUI&cmd=submissionScreen&ass_id=26122">Bereits abgegebene</a>
+      <a href="ilias.php?cmdClass=ilExSubmissionFileGUI&cmd=download&ass_id=26122&delivered=5">Aufgabe_1_1.java</a>
+      {_download_row("lsgen-P1.zip", "downloadGlobalFeedbackFile")}
+    </div>"""
+    files = crawler.parse_assignment(html, EXC_BASE)
+    assert [f.name for f in files] == ["P1.pdf", "vorgaben-P1.zip", "lsgen-P1.zip"]
+    assert all(f.type == "file" and f.exercise and f.ref_id < 0 for f in files)
+    assert files[2].url.startswith("https://ilias.uni-mannheim.de/ilias.php?")
+    # Kennungen stabil über Läufe und eindeutig
+    assert [f.ref_id for f in crawler.parse_assignment(html, EXC_BASE)] == [f.ref_id for f in files]
+    assert len({f.ref_id for f in files}) == 3
+
+
+def test_crawl_descends_into_exercises():
+    class ExcCrawler(FakeCrawler):
+        def list_exercise(self, url):
+            self.visited_urls.append(url)
+            return [IliasObject(crawler.ASSIGNMENT, -11, "P01", "a11")]
+
+        def list_assignment(self, url):
+            self.visited_urls.append(url)
+            return [IliasObject("file", -99, "p1.pdf", "d99", exercise=True)]
+
+    pages = {"k": [IliasObject("fold", 2, "Tutorien", "f2")], "f2": [IliasObject("exc", 3, "Projektblätter", "e3")]}
+    result = ExcCrawler(pages).crawl([course(1, "Kurs", "k")])
+    assert [o.ilias_path for o in result.objects[1]] == [
+        "Kurs / Tutorien",
+        "Kurs / Tutorien / Projektblätter",
+        "Kurs / Tutorien / Projektblätter / P01",
+        "Kurs / Tutorien / Projektblätter / P01 / p1.pdf",
+    ]
+    assert result.objects[1][-1].exercise

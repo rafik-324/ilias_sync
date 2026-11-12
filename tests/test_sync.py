@@ -320,6 +320,18 @@ def test_video_switch(env):
     assert len(sync.plan(m, st, root, Config(base_dir=None))) == 2
 
 
+def test_exercise_switch(env):
+    root, st = env
+    exercise_file = mapped(2, "p1.pdf")
+    exercise_file.obj.exercise = True
+    m = mapping(mapped(1), exercise_file)
+    cfg = Config(base_dir=None, courses=[CourseConfig(100, COURSE.name, "01_marketing", download_exercises=False)])
+    assert [j.item.obj.ref_id for j in sync.plan(m, st, root, cfg)] == [1]
+    # Dateien abgeschaltet, Übungen an: Übungsdateien kommen trotzdem
+    cfg = Config(base_dir=None, courses=[CourseConfig(100, COURSE.name, "01_marketing", download_files=False)])
+    assert [j.item.obj.ref_id for j in sync.plan(m, st, root, cfg)] == [2]
+
+
 def test_dry_run_writes_nothing(env):
     root, st = env
     m = mapping(mapped(1), mapped(2, "b.pdf"))

@@ -16,10 +16,16 @@ Merkmale der Seiten:
     a.il_ContainerItemTitle und Eigenschaften span.il_ItemProperty (bei Dateien:
     Endung, Größe, Änderungsdatum). Der Typ steht meist in li#item_row_<typ>-<ref_id>,
     auf Seiten aus dem Seiten Editor aber nicht, dann über Link oder Icon
+  * Übung (exc): Übersicht der Aufgaben, Ansicht "Alle" über einen Knopf mit
+    cmd=showOverview&mode=all. Je Aufgabe ein Link auf ilAssignmentPresentationGUI mit
+    ass_id, auf der Aufgabenseite Dateien der Arbeitsanweisung (cmd=downloadFile&file=...)
+    und die Musterlösung (cmd=downloadGlobalFeedbackFile), der Dateiname steht in der
+    Zeile davor (.control-label)
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import threading
@@ -29,7 +35,7 @@ from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
-from urllib.parse import urljoin
+from urllib.parse import parse_qs, urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup, Tag
@@ -46,8 +52,12 @@ DEFAULT_DELAY = 0.5
 DEFAULT_PARALLEL = 3
 MAX_PARALLEL = 5
 
-# Objekttypen, in die der Crawler hineingeht
-CONTAINER_TYPES = {"crs", "grp", "fold", "sess"}
+# Aufgabe einer Übung. Kein ILIAS Objekttyp mit ref_id, nur im Crawler als Ordner geführt
+ASSIGNMENT = "ass"
+
+# Objekttypen, in die der Crawler hineingeht. Übungen und ihre Aufgaben gelten als Ordner,
+# ihre Dateien als normale Dateien (IliasObject.exercise gesetzt)
+CONTAINER_TYPES = {"crs", "grp", "fold", "sess", "exc", ASSIGNMENT}
 
 # Lesbare Namen für die Ausgabe
 TYPE_NAMES = {
@@ -59,6 +69,7 @@ TYPE_NAMES = {
     "webr": "Weblink",
     "frm": "Forum",
     "exc": "Übung",
+    ASSIGNMENT: "Aufgabe",
     "wiki": "Wiki",
     "tst": "Test",
     "svy": "Umfrage",
@@ -80,8 +91,10 @@ MEMBERSHIP_BLOCK_RE = re.compile(r"ilmembershipblockgui", re.IGNORECASE)
 COURSE_TITLE_SELECTOR = ".il-item-title a[href], .card-title a[href], .il-card .caption a[href]"
 
 GOTO_RE = re.compile(r"goto\.php(?:/|\?target=)([a-z]+)[/_](\d+)")
-# data-list-item-id="lg_div_<ref_id>_pref_<parent_ref_id>"
-LIST_ITEM_RE = re.compile(r"^lg_div_(\d+)_pref_(\d+)$")
+# data-list-item-id="lg_div_<ref_id>_pref_<parent_ref_id>". Einträge in Blöcken der Kursseite
+# (Objektblöcke, Seiten Editor, Gruppierung nach Typ) haben seit Oktober 2026 eine negative
+# Block Nummer statt der Eltern ref_id, z. B. "lg_div_1787941_pref_-1"
+LIST_ITEM_RE = re.compile(r"^lg_div_(\d+)_pref_(-?\d+)$")
 # li#item_row_<typ>-<ref_id>, auf Seiten aus dem Seiten Editor steht statt des Typs eine Block ID
 ITEM_ROW_RE = re.compile(r"^item_row_([a-z]+)-(\d+)$")
 ICON_RE = re.compile(r"icon_([a-z]+)\.svg")
@@ -129,6 +142,7 @@ class IliasObject:
     size: int | None = None    # Bytes, aus der Anzeige gerundet
     mtime: datetime | None = None
     type_label: str | None = None  # Bezeichnung laut ILIAS (Icon), für unbekannte Typen
+    exercise: bool = False     # Datei aus einer Übung (Aufgabenstellung, Vorgaben, Musterlösung)
 
     @property
     def is_container(self) -> bool:
@@ -284,8 +298,11 @@ def parse_container(html: str, base_url: str = ILIAS) -> list[IliasObject]:
     objects = []
     seen = set()
     for row in root.find_all(class_="ilContainerListItemOuter"):
-        m = LIST_ITEM_RE.match(row.get("data-list-item-id") or "")
+        item_id = row.get("data-list-item-id") or ""
+        m = LIST_ITEM_RE.match(item_id)
         if m is None:
+            # Nie still überspringen: sonst fehlen ganze Ordner, ohne dass es jemand merkt
+            log.warning("Listeneintrag mit unbekannter Kennung übersprungen: %r", item_id)
             continue
         ref_id = int(m.group(1))
         if ref_id in seen:
@@ -314,6 +331,91 @@ def parse_container(html: str, base_url: str = ILIAS) -> list[IliasObject]:
                 obj.name = f"{name}.{ext}"
         objects.append(obj)
     return objects
+
+
+def _query(url: str) -> dict[str, str]:
+    return {k: v[0] for k, v in parse_qs(urlparse(url).query).items()}
+
+
+def assignment_ref_id(ass_id: int) -> int:
+    """Aufgaben haben keine ref_id, sondern eine (in ILIAS eindeutige) ass_id. Negativ,
+    damit sie nie mit einer echten ref_id zusammenfällt."""
+    return -ass_id
+
+
+def exercise_file_id(ass_id: int, kind: str, name: str) -> int:
+    """Stabile Kennung einer Übungsdatei für den Index (dort Primärschlüssel statt ref_id).
+    Negativ und 52 Bit groß, damit sie nie mit einer echten ref_id zusammenfällt."""
+    digest = hashlib.sha1(f"{ass_id}/{kind}/{name}".encode()).hexdigest()
+    return -int(digest[:13], 16)
+
+
+def exercise_all_mode_url(html: str, base_url: str) -> str | None:
+    """Adresse der Ansicht "Alle" einer Übung, None wenn sie schon aktiv ist oder fehlt.
+    Ohne diese Ansicht zeigt ILIAS nur laufende Aufgaben."""
+    soup = BeautifulSoup(html, "html.parser")
+    for el in soup.find_all(["button", "a"]):
+        target = el.get("data-action") or el.get("href") or ""
+        if "cmd=showoverview" in target.lower() and _query(target).get("mode") == "all":
+            if "engaged" in (el.get("class") or []) or el.get("aria-pressed") == "true":
+                return None
+            return urljoin(base_url, target)
+    return None
+
+
+def parse_exercise_overview(html: str, base_url: str) -> list[IliasObject]:
+    """Aufgaben einer Übung, je ass_id einmal, als Ordner (Typ ASSIGNMENT)."""
+    soup = BeautifulSoup(html, "html.parser")
+    root = soup.find(id="il_center_col") or soup
+    assignments = []
+    seen: set[int] = set()
+    for link in root.select(".il-item-title a[href]"):
+        href = link["href"]
+        params = _query(href)
+        if "ilassignmentpresentationgui" not in href.lower() or not params.get("ass_id", "").isdigit():
+            continue
+        ass_id = int(params["ass_id"])
+        name = link.get_text(" ", strip=True)
+        if ass_id in seen or not name:
+            continue
+        seen.add(ass_id)
+        assignments.append(IliasObject(type=ASSIGNMENT, ref_id=assignment_ref_id(ass_id), name=name,
+                                       url=urljoin(base_url, href), type_label="Aufgabe"))
+    if not assignments:
+        log.warning("Übung ohne erkennbare Aufgaben: %s", safe_url(base_url))
+    return assignments
+
+
+# Downloads auf der Aufgabenseite: Arbeitsanweisung und Musterlösung, nie eigene Abgaben
+EXERCISE_DOWNLOAD_CMDS = {"downloadfile": "anweisung", "downloadglobalfeedbackfile": "loesung"}
+
+
+def parse_assignment(html: str, base_url: str) -> list[IliasObject]:
+    """Dateien einer Aufgabe (Arbeitsanweisung, Vorgaben, Musterlösung) als Dateien."""
+    soup = BeautifulSoup(html, "html.parser")
+    root = soup.find(id="il_center_col") or soup
+    files = []
+    seen: set[int] = set()
+    for link in root.find_all("a", href=True):
+        href = link["href"]
+        params = _query(href)
+        kind = EXERCISE_DOWNLOAD_CMDS.get(params.get("cmd", "").lower())
+        if kind is None or "ilexsubmissiongui" not in href.lower() or not params.get("ass_id", "").isdigit():
+            continue
+        # Dateiname aus der Zeile (links steht der Name, rechts der Link "Download")
+        row = link.find_parent(class_="row")
+        label = row.find(class_="control-label") if row else None
+        name = (label.get_text(" ", strip=True) if label else "") or params.get("file", "")
+        if not name:
+            log.warning("Übungsdatei ohne Namen übersprungen: %s", safe_url(base_url))
+            continue
+        ref_id = exercise_file_id(int(params["ass_id"]), kind, name)
+        if ref_id in seen:
+            continue
+        seen.add(ref_id)
+        files.append(IliasObject(type="file", ref_id=ref_id, name=name, url=urljoin(base_url, href),
+                                 type_label="Datei", exercise=True))
+    return files
 
 
 # ---------------- Crawler ----------------
@@ -466,6 +568,24 @@ class Crawler:
     def list_container(self, url: str) -> list[IliasObject]:
         return parse_container(self._get(url), url)
 
+    def list_exercise(self, url: str) -> list[IliasObject]:
+        """Aufgaben einer Übung, in der Ansicht "Alle" (sonst fehlen beendete Aufgaben)."""
+        r = self._get_response(url)
+        if all_url := exercise_all_mode_url(r.text, r.url):
+            r = self._get_response(all_url)
+        return parse_exercise_overview(r.text, r.url)
+
+    def list_assignment(self, url: str) -> list[IliasObject]:
+        r = self._get_response(url)
+        return parse_assignment(r.text, r.url)
+
+    def list_children(self, obj_type: str, url: str) -> list[IliasObject]:
+        if obj_type == "exc":
+            return self.list_exercise(url)
+        if obj_type == ASSIGNMENT:
+            return self.list_assignment(url)
+        return self.list_container(url)
+
     # ---------- ganzer Lauf ----------
 
     def crawl(self, courses: list[Course]) -> CrawlResult:
@@ -503,13 +623,13 @@ class Crawler:
         pending: dict[Future, int] = {}
 
         with ThreadPoolExecutor(max_workers=self.max_parallel, thread_name_prefix="crawl") as pool:
-            def schedule(ref_id: int, url: str) -> None:
+            def schedule(obj_type: str, ref_id: int, url: str) -> None:
                 if ref_id not in scheduled:
                     scheduled.add(ref_id)
-                    pending[pool.submit(self.list_container, url)] = ref_id
+                    pending[pool.submit(self.list_children, obj_type, url)] = ref_id
 
             for course in courses:
-                schedule(course.ref_id, course.url)
+                schedule(course.type, course.ref_id, course.url)
             try:
                 while pending:
                     done, _ = wait(pending, return_when=FIRST_COMPLETED)
@@ -529,7 +649,7 @@ class Crawler:
                         children[ref_id] = objs
                         for obj in objs:
                             if obj.is_container and obj.url:
-                                schedule(obj.ref_id, obj.url)
+                                schedule(obj.type, obj.ref_id, obj.url)
             except BaseException:
                 # SessionExpired, CrawlCancelled oder Strg+C: offene Abrufe verwerfen
                 self.cancel.set()
