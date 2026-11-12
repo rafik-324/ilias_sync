@@ -1,6 +1,6 @@
 [project]
 name = "ilias-sync"
-version = "1.0.3"
+version = "1.0.4"
 description = "Lädt Inhalte aus ILIAS der Universität Mannheim in die lokale Ordnerstruktur"
 requires-python = ">=3.11"
 
